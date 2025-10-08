@@ -1,0 +1,1 @@
+typeSearchIndex = [{"l":"All Classes and Interfaces","u":"allclasses-index.html"},{"p":"io.dazzleduck.sql.logger","l":"ArrowSimpleLogger"},{"p":"io.dazzleduck.sql.logger","l":"ArrowSimpleLoggerFactory"},{"p":"io.dazzleduck.sql.logger","l":"ArrowSLF4JServiceProvider"},{"p":"io.dazzleduck.sql.logger","l":"AsyncArrowFlightSender"}];updateSearchResults();

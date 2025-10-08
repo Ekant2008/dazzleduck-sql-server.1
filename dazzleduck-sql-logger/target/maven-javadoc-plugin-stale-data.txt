@@ -1,0 +1,122 @@
+-J-Duser.language=
+-J-Duser.country=
+@options
+@packages
+-classpath
+'F:/dazzleduck-sql-server.1/dazzleduck-sql-commons/target/dazzleduck-sql-commons-0.0.7.jar;C:/Users/HP/.m2/repository/org/duckdb/duckdb_jdbc/1.3.2.0/duckdb_jdbc-1.3.2.0.jar;C:/Users/HP/.m2/repository/org/apache/arrow/arrow-c-data/18.3.0/arrow-c-data-18.3.0.jar;C:/Users/HP/.m2/repository/io/delta/delta-kernel-api/3.3.0/delta-kernel-api-3.3.0.jar;C:/Users/HP/.m2/repository/org/roaringbitmap/RoaringBitmap/0.9.25/RoaringBitmap-0.9.25.jar;C:/Users/HP/.m2/repository/com/fasterxml/jackson/datatype/jackson-datatype-jdk8/2.13.5/jackson-datatype-jdk8-2.13.5.jar;C:/Users/HP/.m2/repository/io/delta/delta-kernel-defaults/3.3.0/delta-kernel-defaults-3.3.0.jar;C:/Users/HP/.m2/repository/org/apache/parquet/parquet-hadoop/1.12.3/parquet-hadoop-1.12.3.jar;C:/Users/HP/.m2/repository/org/apache/parquet/parquet-column/1.12.3/parquet-column-1.12.3.jar;C:/Users/HP/.m2/repository/org/apache/parquet/parquet-encoding/1.12.3/parquet-encoding-1.12.3.jar;C:/Users/HP/.m2/repository/org/apache/parquet/parquet-format-structures/1.12.3/parquet-format-structures-1.12.3.jar;C:/Users/HP/.m2/repository/org/apache/parquet/parquet-common/1.12.3/parquet-common-1.12.3.jar;C:/Users/HP/.m2/repository/commons-pool/commons-pool/1.6/commons-pool-1.6.jar;C:/Users/HP/.m2/repository/com/github/luben/zstd-jni/1.5.0-1/zstd-jni-1.5.0-1.jar;C:/Users/HP/.m2/repository/org/apache/yetus/audience-annotations/0.13.0/audience-annotations-0.13.0.jar;C:/Users/HP/.m2/repository/io/delta/delta-storage/3.3.0/delta-storage-3.3.0.jar;C:/Users/HP/.m2/repository/org/apache/hadoop/hadoop-client-runtime/3.3.4/hadoop-client-runtime-3.3.4.jar;C:/Users/HP/.m2/repository/org/xerial/snappy/snappy-java/1.1.8.2/snappy-java-1.1.8.2.jar;C:/Users/HP/.m2/repository/org/apache/hadoop/hadoop-client-api/3.3.4/hadoop-client-api-3.3.4.jar;C:/Users/HP/.m2/repository/org/apache/arrow/arrow-vector/15.0.2/arrow-vector-15.0.2.jar;C:/Users/HP/.m2/repository/com/fasterxml/jackson/core/jackson-core/2.16.0/jackson-core-2.16.0.jar;C:/Users/HP/.m2/repository/com/fasterxml/jackson/core/jackson-annotations/2.16.0/jackson-annotations-2.16.0.jar;C:/Users/HP/.m2/repository/com/fasterxml/jackson/core/jackson-databind/2.16.0/jackson-databind-2.16.0.jar;C:/Users/HP/.m2/repository/com/fasterxml/jackson/datatype/jackson-datatype-jsr310/2.16.0/jackson-datatype-jsr310-2.16.0.jar;C:/Users/HP/.m2/repository/commons-codec/commons-codec/1.15/commons-codec-1.15.jar;C:/Users/HP/.m2/repository/com/google/flatbuffers/flatbuffers-java/23.5.26/flatbuffers-java-23.5.26.jar;C:/Users/HP/.m2/repository/org/eclipse/collections/eclipse-collections/11.1.0/eclipse-collections-11.1.0.jar;C:/Users/HP/.m2/repository/org/eclipse/collections/eclipse-collections-api/11.1.0/eclipse-collections-api-11.1.0.jar;C:/Users/HP/.m2/repository/org/apache/arrow/arrow-memory-core/15.0.2/arrow-memory-core-15.0.2.jar;C:/Users/HP/.m2/repository/com/google/code/findbugs/jsr305/3.0.2/jsr305-3.0.2.jar;C:/Users/HP/.m2/repository/org/apache/arrow/arrow-memory-netty/15.0.2/arrow-memory-netty-15.0.2.jar;C:/Users/HP/.m2/repository/io/netty/netty-buffer/4.1.104.Final/netty-buffer-4.1.104.Final.jar;C:/Users/HP/.m2/repository/io/netty/netty-common/4.1.104.Final/netty-common-4.1.104.Final.jar;C:/Users/HP/.m2/repository/org/apache/arrow/arrow-format/15.0.2/arrow-format-15.0.2.jar;C:/Users/HP/.m2/repository/org/slf4j/slf4j-api/2.0.13/slf4j-api-2.0.13.jar;C:/Users/HP/.m2/repository/org/apache/arrow/flight-core/15.0.2/flight-core-15.0.2.jar;C:/Users/HP/.m2/repository/io/grpc/grpc-netty/1.60.0/grpc-netty-1.60.0.jar;C:/Users/HP/.m2/repository/io/netty/netty-codec-http2/4.1.100.Final/netty-codec-http2-4.1.100.Final.jar;C:/Users/HP/.m2/repository/io/netty/netty-codec-http/4.1.100.Final/netty-codec-http-4.1.100.Final.jar;C:/Users/HP/.m2/repository/com/google/errorprone/error_prone_annotations/2.20.0/error_prone_annotations-2.20.0.jar;C:/Users/HP/.m2/repository/io/netty/netty-transport-native-unix-common/4.1.100.Final/netty-transport-native-unix-common-4.1.100.Final.jar;C:/Users/HP/.m2/repository/io/grpc/grpc-core/1.60.0/grpc-core-1.60.0.jar;C:/Users/HP/.m2/repository/io/grpc/grpc-protobuf/1.60.0/grpc-protobuf-1.60.0.jar;C:/Users/HP/.m2/repository/com/google/api/grpc/proto-google-common-protos/2.22.0/proto-google-common-protos-2.22.0.jar;C:/Users/HP/.m2/repository/io/grpc/grpc-protobuf-lite/1.60.0/grpc-protobuf-lite-1.60.0.jar;C:/Users/HP/.m2/repository/io/netty/netty-tcnative-boringssl-static/2.0.61.Final/netty-tcnative-boringssl-static-2.0.61.Final.jar;C:/Users/HP/.m2/repository/io/netty/netty-tcnative-classes/2.0.61.Final/netty-tcnative-classes-2.0.61.Final.jar;C:/Users/HP/.m2/repository/io/netty/netty-tcnative-boringssl-static/2.0.61.Final/netty-tcnative-boringssl-static-2.0.61.Final-linux-x86_64.jar;C:/Users/HP/.m2/repository/io/netty/netty-tcnative-boringssl-static/2.0.61.Final/netty-tcnative-boringssl-static-2.0.61.Final-linux-aarch_64.jar;C:/Users/HP/.m2/repository/io/netty/netty-tcnative-boringssl-static/2.0.61.Final/netty-tcnative-boringssl-static-2.0.61.Final-osx-x86_64.jar;C:/Users/HP/.m2/repository/io/netty/netty-tcnative-boringssl-static/2.0.61.Final/netty-tcnative-boringssl-static-2.0.61.Final-osx-aarch_64.jar;C:/Users/HP/.m2/repository/io/netty/netty-tcnative-boringssl-static/2.0.61.Final/netty-tcnative-boringssl-static-2.0.61.Final-windows-x86_64.jar;C:/Users/HP/.m2/repository/io/netty/netty-handler/4.1.104.Final/netty-handler-4.1.104.Final.jar;C:/Users/HP/.m2/repository/io/netty/netty-resolver/4.1.104.Final/netty-resolver-4.1.104.Final.jar;C:/Users/HP/.m2/repository/io/netty/netty-codec/4.1.104.Final/netty-codec-4.1.104.Final.jar;C:/Users/HP/.m2/repository/io/netty/netty-transport/4.1.104.Final/netty-transport-4.1.104.Final.jar;C:/Users/HP/.m2/repository/com/google/guava/guava/33.0.0-jre/guava-33.0.0-jre.jar;C:/Users/HP/.m2/repository/com/google/guava/failureaccess/1.0.2/failureaccess-1.0.2.jar;C:/Users/HP/.m2/repository/com/google/guava/listenablefuture/9999.0-empty-to-avoid-conflict-with-guava/listenablefuture-9999.0-empty-to-avoid-conflict-with-guava.jar;C:/Users/HP/.m2/repository/org/checkerframework/checker-qual/3.41.0/checker-qual-3.41.0.jar;C:/Users/HP/.m2/repository/com/google/j2objc/j2objc-annotations/2.8/j2objc-annotations-2.8.jar;C:/Users/HP/.m2/repository/io/grpc/grpc-stub/1.60.0/grpc-stub-1.60.0.jar;C:/Users/HP/.m2/repository/com/google/protobuf/protobuf-java/3.23.1/protobuf-java-3.23.1.jar;C:/Users/HP/.m2/repository/io/grpc/grpc-api/1.60.0/grpc-api-1.60.0.jar;C:/Users/HP/.m2/repository/javax/annotation/javax.annotation-api/1.3.2/javax.annotation-api-1.3.2.jar;C:/Users/HP/.m2/repository/org/jcommander/jcommander/2.0/jcommander-2.0.jar;C:/Users/HP/.m2/repository/com/typesafe/config/1.4.3/config-1.4.3.jar;C:/Users/HP/.m2/repository/io/jsonwebtoken/jjwt/0.12.6/jjwt-0.12.6.jar;C:/Users/HP/.m2/repository/io/jsonwebtoken/jjwt-api/0.12.6/jjwt-api-0.12.6.jar'
+-encoding
+'UTF-8'
+-protected
+-source
+'21'
+-sourcepath
+'F:/dazzleduck-sql-server.1/dazzleduck-sql-logger/src/main/java;F:/dazzleduck-sql-server.1/dazzleduck-sql-logger/target/generated-sources/annotations'
+-author
+-bottom
+'Copyright &#169; 2025. All rights reserved.'
+-charset
+'UTF-8'
+-d
+'F:/dazzleduck-sql-server.1/dazzleduck-sql-logger/target/reports/apidocs'
+-docencoding
+'UTF-8'
+-doctitle
+'dazzleduck-sql-logger 0.0.7 API'
+-linkoffline
+'https://github.com/dazzleduck-web/dazzleduck-sql-server/dazzleduck-sql-commons/apidocs' 'F:/dazzleduck-sql-server.1/dazzleduck-sql-commons/target/reports/apidocs'
+-use
+-version
+-windowtitle
+'dazzleduck-sql-logger 0.0.7 API'
+io.dazzleduck.sql.logger
+F:\dazzleduck-sql-server.1\dazzleduck-sql-commons\target\dazzleduck-sql-commons-0.0.7.jar = 1759761316131
+C:\Users\HP\.m2\repository\org\duckdb\duckdb_jdbc\1.3.2.0\duckdb_jdbc-1.3.2.0.jar = 1755951399455
+C:\Users\HP\.m2\repository\org\apache\arrow\arrow-c-data\18.3.0\arrow-c-data-18.3.0.jar = 1751638950979
+C:\Users\HP\.m2\repository\io\delta\delta-kernel-api\3.3.0\delta-kernel-api-3.3.0.jar = 1751638961424
+C:\Users\HP\.m2\repository\org\roaringbitmap\RoaringBitmap\0.9.25\RoaringBitmap-0.9.25.jar = 1751638963793
+C:\Users\HP\.m2\repository\com\fasterxml\jackson\datatype\jackson-datatype-jdk8\2.13.5\jackson-datatype-jdk8-2.13.5.jar = 1751638995207
+C:\Users\HP\.m2\repository\io\delta\delta-kernel-defaults\3.3.0\delta-kernel-defaults-3.3.0.jar = 1751638997541
+C:\Users\HP\.m2\repository\org\apache\parquet\parquet-hadoop\1.12.3\parquet-hadoop-1.12.3.jar = 1751638976343
+C:\Users\HP\.m2\repository\org\apache\parquet\parquet-column\1.12.3\parquet-column-1.12.3.jar = 1751638981609
+C:\Users\HP\.m2\repository\org\apache\parquet\parquet-encoding\1.12.3\parquet-encoding-1.12.3.jar = 1751638988047
+C:\Users\HP\.m2\repository\org\apache\parquet\parquet-format-structures\1.12.3\parquet-format-structures-1.12.3.jar = 1751639001648
+C:\Users\HP\.m2\repository\org\apache\parquet\parquet-common\1.12.3\parquet-common-1.12.3.jar = 1751638983960
+C:\Users\HP\.m2\repository\commons-pool\commons-pool\1.6\commons-pool-1.6.jar = 1751639017300
+C:\Users\HP\.m2\repository\com\github\luben\zstd-jni\1.5.0-1\zstd-jni-1.5.0-1.jar = 1751639030088
+C:\Users\HP\.m2\repository\org\apache\yetus\audience-annotations\0.13.0\audience-annotations-0.13.0.jar = 1751638948290
+C:\Users\HP\.m2\repository\io\delta\delta-storage\3.3.0\delta-storage-3.3.0.jar = 1751638949489
+C:\Users\HP\.m2\repository\org\apache\hadoop\hadoop-client-runtime\3.3.4\hadoop-client-runtime-3.3.4.jar = 1751639043523
+C:\Users\HP\.m2\repository\org\xerial\snappy\snappy-java\1.1.8.2\snappy-java-1.1.8.2.jar = 1751638997409
+C:\Users\HP\.m2\repository\org\apache\hadoop\hadoop-client-api\3.3.4\hadoop-client-api-3.3.4.jar = 1751638988683
+C:\Users\HP\.m2\repository\org\apache\arrow\arrow-vector\15.0.2\arrow-vector-15.0.2.jar = 1759673223360
+C:\Users\HP\.m2\repository\com\fasterxml\jackson\core\jackson-core\2.16.0\jackson-core-2.16.0.jar = 1753862724643
+C:\Users\HP\.m2\repository\com\fasterxml\jackson\core\jackson-annotations\2.16.0\jackson-annotations-2.16.0.jar = 1753862725037
+C:\Users\HP\.m2\repository\com\fasterxml\jackson\core\jackson-databind\2.16.0\jackson-databind-2.16.0.jar = 1753862726768
+C:\Users\HP\.m2\repository\com\fasterxml\jackson\datatype\jackson-datatype-jsr310\2.16.0\jackson-datatype-jsr310-2.16.0.jar = 1753862727505
+C:\Users\HP\.m2\repository\commons-codec\commons-codec\1.15\commons-codec-1.15.jar = 1750904699051
+C:\Users\HP\.m2\repository\com\google\flatbuffers\flatbuffers-java\23.5.26\flatbuffers-java-23.5.26.jar = 1753862727467
+C:\Users\HP\.m2\repository\org\eclipse\collections\eclipse-collections\11.1.0\eclipse-collections-11.1.0.jar = 1753862741029
+C:\Users\HP\.m2\repository\org\eclipse\collections\eclipse-collections-api\11.1.0\eclipse-collections-api-11.1.0.jar = 1753862726623
+C:\Users\HP\.m2\repository\org\apache\arrow\arrow-memory-core\15.0.2\arrow-memory-core-15.0.2.jar = 1759673222982
+C:\Users\HP\.m2\repository\com\google\code\findbugs\jsr305\3.0.2\jsr305-3.0.2.jar = 1750775033674
+C:\Users\HP\.m2\repository\org\apache\arrow\arrow-memory-netty\15.0.2\arrow-memory-netty-15.0.2.jar = 1759673222736
+C:\Users\HP\.m2\repository\io\netty\netty-buffer\4.1.104.Final\netty-buffer-4.1.104.Final.jar = 1756346389868
+C:\Users\HP\.m2\repository\io\netty\netty-common\4.1.104.Final\netty-common-4.1.104.Final.jar = 1756346390243
+C:\Users\HP\.m2\repository\org\apache\arrow\arrow-format\15.0.2\arrow-format-15.0.2.jar = 1759673222975
+C:\Users\HP\.m2\repository\org\slf4j\slf4j-api\2.0.13\slf4j-api-2.0.13.jar = 1750861921740
+C:\Users\HP\.m2\repository\org\apache\arrow\flight-core\15.0.2\flight-core-15.0.2.jar = 1759720320626
+C:\Users\HP\.m2\repository\io\grpc\grpc-netty\1.60.0\grpc-netty-1.60.0.jar = 1759720320806
+C:\Users\HP\.m2\repository\io\netty\netty-codec-http2\4.1.100.Final\netty-codec-http2-4.1.100.Final.jar = 1753430882731
+C:\Users\HP\.m2\repository\io\netty\netty-codec-http\4.1.100.Final\netty-codec-http-4.1.100.Final.jar = 1753430869325
+C:\Users\HP\.m2\repository\com\google\errorprone\error_prone_annotations\2.20.0\error_prone_annotations-2.20.0.jar = 1753862723692
+C:\Users\HP\.m2\repository\io\netty\netty-transport-native-unix-common\4.1.100.Final\netty-transport-native-unix-common-4.1.100.Final.jar = 1753430871434
+C:\Users\HP\.m2\repository\io\grpc\grpc-core\1.60.0\grpc-core-1.60.0.jar = 1759720320464
+C:\Users\HP\.m2\repository\io\grpc\grpc-protobuf\1.60.0\grpc-protobuf-1.60.0.jar = 1759720321045
+C:\Users\HP\.m2\repository\com\google\api\grpc\proto-google-common-protos\2.22.0\proto-google-common-protos-2.22.0.jar = 1759720321867
+C:\Users\HP\.m2\repository\io\grpc\grpc-protobuf-lite\1.60.0\grpc-protobuf-lite-1.60.0.jar = 1759720322356
+C:\Users\HP\.m2\repository\io\netty\netty-tcnative-boringssl-static\2.0.61.Final\netty-tcnative-boringssl-static-2.0.61.Final.jar = 1756349263985
+C:\Users\HP\.m2\repository\io\netty\netty-tcnative-classes\2.0.61.Final\netty-tcnative-classes-2.0.61.Final.jar = 1756349264115
+C:\Users\HP\.m2\repository\io\netty\netty-tcnative-boringssl-static\2.0.61.Final\netty-tcnative-boringssl-static-2.0.61.Final-linux-x86_64.jar = 1756349266119
+C:\Users\HP\.m2\repository\io\netty\netty-tcnative-boringssl-static\2.0.61.Final\netty-tcnative-boringssl-static-2.0.61.Final-linux-aarch_64.jar = 1756349267731
+C:\Users\HP\.m2\repository\io\netty\netty-tcnative-boringssl-static\2.0.61.Final\netty-tcnative-boringssl-static-2.0.61.Final-osx-x86_64.jar = 1756349269172
+C:\Users\HP\.m2\repository\io\netty\netty-tcnative-boringssl-static\2.0.61.Final\netty-tcnative-boringssl-static-2.0.61.Final-osx-aarch_64.jar = 1756349270338
+C:\Users\HP\.m2\repository\io\netty\netty-tcnative-boringssl-static\2.0.61.Final\netty-tcnative-boringssl-static-2.0.61.Final-windows-x86_64.jar = 1756349271411
+C:\Users\HP\.m2\repository\io\netty\netty-handler\4.1.104.Final\netty-handler-4.1.104.Final.jar = 1759720320458
+C:\Users\HP\.m2\repository\io\netty\netty-resolver\4.1.104.Final\netty-resolver-4.1.104.Final.jar = 1759720320626
+C:\Users\HP\.m2\repository\io\netty\netty-codec\4.1.104.Final\netty-codec-4.1.104.Final.jar = 1759720320411
+C:\Users\HP\.m2\repository\io\netty\netty-transport\4.1.104.Final\netty-transport-4.1.104.Final.jar = 1759720320699
+C:\Users\HP\.m2\repository\com\google\guava\guava\33.0.0-jre\guava-33.0.0-jre.jar = 1751950574091
+C:\Users\HP\.m2\repository\com\google\guava\failureaccess\1.0.2\failureaccess-1.0.2.jar = 1751013889087
+C:\Users\HP\.m2\repository\com\google\guava\listenablefuture\9999.0-empty-to-avoid-conflict-with-guava\listenablefuture-9999.0-empty-to-avoid-conflict-with-guava.jar = 1750775032372
+C:\Users\HP\.m2\repository\org\checkerframework\checker-qual\3.41.0\checker-qual-3.41.0.jar = 1751950575193
+C:\Users\HP\.m2\repository\com\google\j2objc\j2objc-annotations\2.8\j2objc-annotations-2.8.jar = 1750775020874
+C:\Users\HP\.m2\repository\io\grpc\grpc-stub\1.60.0\grpc-stub-1.60.0.jar = 1759720320812
+C:\Users\HP\.m2\repository\com\google\protobuf\protobuf-java\3.23.1\protobuf-java-3.23.1.jar = 1753927973645
+C:\Users\HP\.m2\repository\io\grpc\grpc-api\1.60.0\grpc-api-1.60.0.jar = 1759720320677
+C:\Users\HP\.m2\repository\javax\annotation\javax.annotation-api\1.3.2\javax.annotation-api-1.3.2.jar = 1751950561975
+C:\Users\HP\.m2\repository\org\jcommander\jcommander\2.0\jcommander-2.0.jar = 1751950562205
+C:\Users\HP\.m2\repository\com\typesafe\config\1.4.3\config-1.4.3.jar = 1751950570263
+C:\Users\HP\.m2\repository\io\jsonwebtoken\jjwt\0.12.6\jjwt-0.12.6.jar = 1751950570504
+C:\Users\HP\.m2\repository\io\jsonwebtoken\jjwt-api\0.12.6\jjwt-api-0.12.6.jar = 1751950570775
+F:\dazzleduck-sql-server.1\dazzleduck-sql-logger\src\main\java = 1759716436349
+F:\dazzleduck-sql-server.1\dazzleduck-sql-logger\target\generated-sources\annotations = 1759761361962
+F:\dazzleduck-sql-server.1\dazzleduck-sql-logger\target\reports\apidocs\allclasses-index.html = 1759761367867
+F:\dazzleduck-sql-server.1\dazzleduck-sql-logger\target\reports\apidocs\allpackages-index.html = 1759761367867
+F:\dazzleduck-sql-server.1\dazzleduck-sql-logger\target\reports\apidocs\copy.svg = 1759761367930
+F:\dazzleduck-sql-server.1\dazzleduck-sql-logger\target\reports\apidocs\element-list = 1759761367773
+F:\dazzleduck-sql-server.1\dazzleduck-sql-logger\target\reports\apidocs\help-doc.html = 1759761367914
+F:\dazzleduck-sql-server.1\dazzleduck-sql-logger\target\reports\apidocs\index-all.html = 1759761367898
+F:\dazzleduck-sql-server.1\dazzleduck-sql-logger\target\reports\apidocs\index.html = 1759761367914
+F:\dazzleduck-sql-server.1\dazzleduck-sql-logger\target\reports\apidocs\link.svg = 1759761367930
+F:\dazzleduck-sql-server.1\dazzleduck-sql-logger\target\reports\apidocs\member-search-index.js = 1759761367883
+F:\dazzleduck-sql-server.1\dazzleduck-sql-logger\target\reports\apidocs\module-search-index.js = 1759761367867
+F:\dazzleduck-sql-server.1\dazzleduck-sql-logger\target\reports\apidocs\overview-tree.html = 1759761367852
+F:\dazzleduck-sql-server.1\dazzleduck-sql-logger\target\reports\apidocs\package-search-index.js = 1759761367883
+F:\dazzleduck-sql-server.1\dazzleduck-sql-logger\target\reports\apidocs\script.js = 1759761367930
+F:\dazzleduck-sql-server.1\dazzleduck-sql-logger\target\reports\apidocs\search-page.js = 1759761367930
+F:\dazzleduck-sql-server.1\dazzleduck-sql-logger\target\reports\apidocs\search.html = 1759761367914
+F:\dazzleduck-sql-server.1\dazzleduck-sql-logger\target\reports\apidocs\search.js = 1759761367930
+F:\dazzleduck-sql-server.1\dazzleduck-sql-logger\target\reports\apidocs\serialized-form.html = 1759761367820
+F:\dazzleduck-sql-server.1\dazzleduck-sql-logger\target\reports\apidocs\stylesheet.css = 1759761367914
+F:\dazzleduck-sql-server.1\dazzleduck-sql-logger\target\reports\apidocs\tag-search-index.js = 1759761367883
+F:\dazzleduck-sql-server.1\dazzleduck-sql-logger\target\reports\apidocs\type-search-index.js = 1759761367883
