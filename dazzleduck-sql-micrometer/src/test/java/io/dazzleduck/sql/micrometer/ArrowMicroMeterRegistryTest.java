@@ -167,7 +167,7 @@ class ArrowMicroMeterRegistryTest {
         DistributionSummary summary = DistributionSummary.builder("test.summary").register(registry);
         summary.record(5);
         summary.record(15);
-
+        testClock.add(Duration.ofSeconds(6));// add this because we are able add record in DistributionSummary
         tempFile = File.createTempFile("test-metrics-", ".arrow");
         System.out.println("Arrow file created at: " + tempFile.getAbsolutePath());
         ArrowFileWriterUtil.writeMetersToFile(new ArrayList<>(registry.getMeters()), tempFile.getAbsolutePath());
@@ -192,6 +192,17 @@ class ArrowMicroMeterRegistryTest {
         TestUtils.isEqual(
                 "select 2.0 as value, 0.0 as min, 15.0 as max, 10.0 as mean",
                 "select value, min, max, mean from read_arrow('%s')".formatted(tempFile.getAbsolutePath())
+        );
+        TestUtils.isEqual(
+                """
+                select 'test.summary' as name,
+                       'distribution_summary' as type,
+                       'ap101' as applicationId,
+                       'MyApplication' as applicationName,
+                       'localhost' as host
+                """,
+                "select name, type, applicationId, applicationName, host from read_arrow('%s')"
+                        .formatted(tempFile.getAbsolutePath())
         );
     }
 }

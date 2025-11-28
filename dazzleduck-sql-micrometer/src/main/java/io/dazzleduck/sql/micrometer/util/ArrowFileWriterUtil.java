@@ -1,5 +1,7 @@
 package io.dazzleduck.sql.micrometer.util;
 
+import com.typesafe.config.Config;
+import com.typesafe.config.ConfigFactory;
 import io.dazzleduck.sql.commons.types.JavaRow;
 import io.dazzleduck.sql.commons.types.VectorSchemaRootWriter;
 import io.micrometer.core.instrument.*;
@@ -93,7 +95,10 @@ public final class ArrowFileWriterUtil {
      */
     private static JavaRow toRow(Meter meter) {
         Meter.Id id = meter.getId();
-
+        Config config = ConfigFactory.load().getConfig("dazzleduck_Info");
+        String applicationId = config.getString("id");
+        String applicationName = config.getString("name");
+        String host = config.getString("host");
         Map<String, String> tagsMap = new LinkedHashMap<>();
         for (Tag t : id.getTags()) {
             tagsMap.put(t.getKey(), t.getValue());
@@ -156,6 +161,9 @@ public final class ArrowFileWriterUtil {
         return new JavaRow(new Object[]{
                 id.getName(),
                 id.getType().name().toLowerCase(),
+                applicationId,
+                applicationName,
+                host,
                 tagsMap,
                 !Double.isNaN(value) ? value : 0,
                 !Double.isNaN(min) ? min : 0,
@@ -173,7 +181,9 @@ public final class ArrowFileWriterUtil {
 
         fields.add(new Field("name", FieldType.notNullable(new ArrowType.Utf8()), null));
         fields.add(new Field("type", FieldType.notNullable(new ArrowType.Utf8()), null));
-
+        fields.add(new Field("applicationId", FieldType.nullable(new ArrowType.Utf8()), null));
+        fields.add(new Field("applicationName", FieldType.nullable(new ArrowType.Utf8()), null));
+        fields.add(new Field("host", FieldType.nullable(new ArrowType.Utf8()), null));
         // tags: Map<String, String>
         Field keyField = new Field("key", FieldType.notNullable(new ArrowType.Utf8()), null);
         Field valField = new Field("value", FieldType.nullable(new ArrowType.Utf8()), null);
