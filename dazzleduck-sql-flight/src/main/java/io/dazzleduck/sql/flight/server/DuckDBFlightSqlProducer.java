@@ -748,6 +748,7 @@ public class DuckDBFlightSqlProducer implements FlightSqlProducer, AutoCloseable
             ArrowReader inputReader,
             StreamListener<PutResult> ackStream) {
         return () -> {
+            recorder.startBulkIngest();
             Path tempFile;
             try (inputReader) {
                 tempFile = BulkIngestQueue.writeAndValidateTempArrowFile(tempDir, inputReader);
@@ -762,6 +763,7 @@ public class DuckDBFlightSqlProducer implements FlightSqlProducer, AutoCloseable
                 });
                 var result = ingestionQueue.addToQueue(batch);
                 result.get();
+                recorder.endBulkIngest();
                 ackStream.onNext(PutResult.empty());
                 ackStream.onCompleted();
             } catch (Throwable throwable) {
