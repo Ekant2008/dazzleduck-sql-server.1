@@ -3,6 +3,7 @@ package io.dazzleduck.sql.flight;
 import io.dazzleduck.sql.flight.model.FlightMetricsSnapshot;
 import io.micrometer.core.instrument.*;
 
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 
 public class MicroMeterFlightRecorder implements FlightRecorder {
@@ -32,6 +33,7 @@ public class MicroMeterFlightRecorder implements FlightRecorder {
     private final Counter streamStatementCompletedCounter;
     private final Counter streamPreparedStatementCompletedCounter;
     private final Counter bulkIngestCompletedCounter;
+    private final Timer bulkIngestTimer;
 
 
 
@@ -67,6 +69,7 @@ public class MicroMeterFlightRecorder implements FlightRecorder {
 
         this.stremPreparedStatementBytesOutCounter = counter("stream_prepared_statement_bytes_out", producerId);
         this.stremStatementBytesOutCounter = counter("stream_statement_bytes_out", producerId);
+        this.bulkIngestTimer = timer("bulk_ingest", producerId);
 
     }
 
@@ -149,12 +152,15 @@ public class MicroMeterFlightRecorder implements FlightRecorder {
 
     @Override
     public void startBulkIngest() {
+        bulkIngestCounter.increment();
         startNanos.set(System.nanoTime());
     }
 
     @Override
     public void endBulkIngest() {
+        long elapsed = System.nanoTime() - startNanos.get();
         bulkIngestCompletedCounter.increment();
+        bulkIngestTimer.record(elapsed, TimeUnit.NANOSECONDS);
     }
 
     @Override
