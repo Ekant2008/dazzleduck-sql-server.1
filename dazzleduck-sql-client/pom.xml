@@ -29,6 +29,11 @@
             <version>18.3.0</version>
             <scope>compile</scope>
         </dependency>
+        <dependency>
+            <groupId>io.dazzleduck.sql</groupId>
+            <artifactId>dazzleduck-sql-common</artifactId>
+            <version>${project.version}</version>
+        </dependency>
     </dependencies>
 
 </project>

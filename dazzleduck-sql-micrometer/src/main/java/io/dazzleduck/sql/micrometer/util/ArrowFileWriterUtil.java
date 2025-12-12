@@ -2,8 +2,8 @@ package io.dazzleduck.sql.micrometer.util;
 
 import com.typesafe.config.Config;
 import com.typesafe.config.ConfigFactory;
-import io.dazzleduck.sql.commons.types.JavaRow;
-import io.dazzleduck.sql.commons.types.VectorSchemaRootWriter;
+import io.dazzleduck.sql.common.types.JavaRow;
+import io.dazzleduck.sql.client.types.VectorSchemaRootWriter;
 import io.micrometer.core.instrument.*;
 import io.micrometer.core.instrument.Timer;
 import io.micrometer.core.instrument.distribution.HistogramSnapshot;
