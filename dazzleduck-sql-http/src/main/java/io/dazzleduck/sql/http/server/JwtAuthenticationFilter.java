@@ -38,9 +38,13 @@ public class JwtAuthenticationFilter implements Filter {
     public JwtAuthenticationFilter(List<String> paths, Config config, SecretKey secretKey, SqlAuthorizer sqlAuthorizer) {
         this.config = config;
         this.secretKey = secretKey;
-        this.jwtParser = Jwts.parser()
-                .verifyWith(secretKey)
-                .build();
+        if (secretKey != null) {
+            this.jwtParser = Jwts.parser()
+                    .verifyWith(secretKey)
+                    .build();
+        } else {
+            this.jwtParser = null;
+        }
         this.paths = paths;
         this.claimHeader = config.getStringList(ConfigConstants.JWT_TOKEN_CLAIMS_GENERATE_HEADERS_KEY);
         this.validateHeaders = new HashSet<>(config.getStringList(ConfigConstants.JWT_TOKEN_CLAIMS_VALIDATE_HEADERS_KEY));
@@ -66,6 +70,11 @@ public class JwtAuthenticationFilter implements Filter {
 
     @Override
     public void filter(FilterChain chain, RoutingRequest req, RoutingResponse res) {
+        if (secretKey == null) {
+            chain.proceed();
+            return;
+        }
+
         boolean authenticate = false;
         for (var path : paths) {
             if (req.path().path().startsWith(path)) {
