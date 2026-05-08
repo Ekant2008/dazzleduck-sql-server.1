@@ -361,8 +361,10 @@ public class DuckDBFlightSqlProducer implements FlightSqlHttpProducer, SqlProduc
         this.maxQueryTimeout = maxQueryTimeout;
         this.recorder = recorder;
         if (AccessMode.RESTRICTED == accessMode) {
-            this.sqlAuthorizer = SqlAuthorizer.JWT_AUTHORIZER;
-        } else if(AccessMode.COMPLETE == accessMode ) {
+            this.sqlAuthorizer = SqlAuthorizer.RESTRICTED_DATASOURCE_AUTHORIZER;
+        } else if (AccessMode.RESTRICT_READ_ONLY == accessMode) {
+            this.sqlAuthorizer = SqlAuthorizer.RESTRICT_READ_ONLY_AUTHORIZER;
+        } else if (AccessMode.COMPLETE == accessMode) {
             this.sqlAuthorizer = SqlAuthorizer.NOOP_AUTHORIZER;
         } else {
             this.sqlAuthorizer = SqlAuthorizer.SELECT_ONLY_AUTHORIZER;
@@ -1445,6 +1447,10 @@ public class DuckDBFlightSqlProducer implements FlightSqlHttpProducer, SqlProduc
 
     protected StatementHandle newStatementHandle(String query) {
         return newStatementHandle(query, -1);
+    }
+
+    protected static <T> T throwNotSupported(String operation) {
+        throw new UnsupportedOperationException("Operation not supported: " + operation);
     }
 
 }

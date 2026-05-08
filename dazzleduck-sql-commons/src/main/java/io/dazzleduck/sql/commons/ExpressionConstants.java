@@ -37,6 +37,7 @@ public class ExpressionConstants {
     public static final String NODE_TYPE_SUBQUERY = "SUBQUERY";
     public static final String NODE_TYPE_SELECT_NODE = "SELECT_NODE";
     public static final String NODE_TYPE_SET_OPERATION_NODE = "SET_OPERATION_NODE";
+    public static final String NODE_TYPE_JOIN = "JOIN";
 
     // Field name constants for JSON AST nodes
     public static final String FIELD_CLASS = "class";

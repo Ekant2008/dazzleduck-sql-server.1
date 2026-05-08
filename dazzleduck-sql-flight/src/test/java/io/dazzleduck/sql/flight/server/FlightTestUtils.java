@@ -104,6 +104,43 @@ public interface FlightTestUtils {
                 serverLocation, additionalClientHeaders, testAuthenticator);
     }
 
+    default ServerClient createRestrictReadOnlyServerClient(Location serverLocation,
+                                                              Map<String, String> additionalClientHeaders) throws IOException, NoSuchAlgorithmException {
+        var producerId = UUID.randomUUID().toString();
+        var warehousePath = Files.createTempDirectory("duckdb_warehouse_restrict_read_only_").toString();
+        var clientAllocator = new RootAllocator();
+        var serverAllocator = new RootAllocator();
+
+        var flightServer = FlightServer.builder(
+                        serverAllocator,
+                        serverLocation,
+                        new RestrictedReadOnlyFlightSqlProducer(
+                                serverLocation, producerId, "change me",
+                                serverAllocator, warehousePath, AccessMode.RESTRICT_READ_ONLY,
+                                Path.of(System.getProperty("java.io.tmpdir"), UUID.randomUUID().toString()),
+                                new NOOPIngestionTaskFactoryProvider(warehousePath + File.pathSeparator + "ingestion").getIngestionHandler(),
+                                Executors.newSingleThreadScheduledExecutor(),
+                                Duration.ofMinutes(2), Duration.ofMinutes(2),
+                                Clock.systemDefaultZone(),
+                                DuckDBFlightSqlProducer.buildRecorder(producerId),
+                                DuckDBFlightSqlProducer.DEFAULT_INGESTION_CONFIG,
+                                List.of()))
+                .middleware(AdvanceServerCallHeaderAuthMiddleware.KEY,
+                        new AdvanceServerCallHeaderAuthMiddleware.Factory(getTestJWTTokenAuthenticator()))
+                .build()
+                .start();
+
+        var allHeaders = new HashMap<String, String>();
+        allHeaders.put(Headers.HEADER_DATABASE, testCatalog());
+        allHeaders.put(Headers.HEADER_SCHEMA, testSchema());
+        allHeaders.putAll(additionalClientHeaders);
+
+        var client = new FlightSqlClient(FlightClient.builder(clientAllocator, serverLocation)
+                .intercept(AuthUtils.createClientMiddlewareFactory(testUser(), testUserPassword(), allHeaders))
+                .build());
+        return new ServerClient(flightServer, client, clientAllocator, warehousePath);
+    }
+
     default ServerClient createReadOnlyServerClient(Location serverLocation) throws IOException, NoSuchAlgorithmException {
         return createReadOnlyServerClient(serverLocation, Map.of());
     }
@@ -153,7 +190,7 @@ public interface FlightTestUtils {
 
     static AdvanceJWTTokenAuthenticator getTestJWTTokenAuthenticator() throws NoSuchAlgorithmException {
         var jwtGenerateConfigString = """
-                jwt_token.claims.generate.headers=[database,catalog,schema,table,filter,path,function]
+                jwt_token.claims.generate.headers=[database,catalog,schema,table,filter,access,path,function]
                 jwt_token.claims.validate.headers=[database,schema]
                 """;
         var jwtConfig = ConfigFactory.parseString(jwtGenerateConfigString);

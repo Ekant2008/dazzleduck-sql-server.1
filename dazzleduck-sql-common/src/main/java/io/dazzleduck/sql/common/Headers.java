@@ -23,6 +23,10 @@ public class Headers {
     public static final String QUERY_PARAMETER_INGESTION_QUEUE = "ingestion_queue";
     public static final String HEADER_FUNCTION = "function";
     public static final String HEADER_FILTER = "filter";
+    // Datasource access rules: JSON array [[type, name, projection, filter], ...]
+    // All four elements required. type: "table"|"path"|"function"; use "*" for all columns, "true" for no row filter.
+    // Takes precedence over HEADER_FILTER when present.
+    public static final String HEADER_ACCESS = "access";
     public static final String HEADER_ACCESS_TYPE = "access-type";
     public static final String HEADER_SPLIT_SIZE = "x-dd-split-size";
     public static final String HEADER_DATA_PARTITION = "x-dd-partition";
@@ -50,7 +54,8 @@ public class Headers {
 
     public static final Set<String> SUPPORTED_HEADERS = Set.of(HEADER_FETCH_SIZE, HEADER_DATABASE, HEADER_SCHEMA, HEADER_SPLIT_SIZE,
             HEADER_DATA_PARTITION, HEADER_DATA_FORMAT, HEADER_PRODUCER_ID, HEADER_PRODUCER_BATCH_ID, HEADER_SORT_ORDER,
-            HEADER_APP_DATA_TRANSFORMATION, HEADER_PATH, HEADER_TABLE, HEADER_FUNCTION, HEADER_FILTER, HEADER_ACCESS_TYPE,
-            HEADER_ARROW_COMPRESSION, QUERY_PARAMETER_INGESTION_QUEUE, HEADER_QUERY_TIMEOUT, HEADER_DATA_LIMIT, HEADER_DATA_OFFSET);
+            HEADER_APP_DATA_TRANSFORMATION, HEADER_PATH, HEADER_TABLE, HEADER_FUNCTION, HEADER_FILTER, HEADER_ACCESS,
+            HEADER_ACCESS_TYPE, HEADER_ARROW_COMPRESSION, QUERY_PARAMETER_INGESTION_QUEUE,
+            HEADER_QUERY_TIMEOUT, HEADER_DATA_LIMIT, HEADER_DATA_OFFSET);
 
 }

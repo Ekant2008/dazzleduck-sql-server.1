@@ -52,11 +52,11 @@ import static io.dazzleduck.sql.common.Headers.HEADER_TOKEN_REDIRECT;
  * @see SqlAuthorizer
  * @see AccessType
  */
-public class JwtClaimBasedAuthorizer implements SqlAuthorizer {
+public class RestrictedDatasourceOnlyAuthorizer implements SqlAuthorizer {
 
-    public static SqlAuthorizer INSTANCE = new JwtClaimBasedAuthorizer();
+    public static SqlAuthorizer INSTANCE = new RestrictedDatasourceOnlyAuthorizer();
 
-    private JwtClaimBasedAuthorizer() {
+    private RestrictedDatasourceOnlyAuthorizer() {
 
     }
 
@@ -68,15 +68,67 @@ public class JwtClaimBasedAuthorizer implements SqlAuthorizer {
             return RedirectAuthorizer.INSTANCE.authorize(user, database, schema, query, verifiedClaims);
         }
 
-        // --- Inline mode (original logic) ---
+        // --- Inline mode ---
         var catalogSchemaTables =
-                Transformations.getAllTablesOrPathsFromSelect(Transformations.getFirstStatementNode(query), database, schema);
+                Transformations.collectAllTableReferences(Transformations.getFirstStatementNode(query), database, schema);
 
         if (catalogSchemaTables.isEmpty()) {
             throw new UnauthorizedException("No table or path found in query");
         }
 
         var updatedQuery = SqlAuthorizer.withUpdatedDatabaseSchema(query, database, schema);
+
+        // access takes precedence: [[type, name, projection, filter]] — exactly one entry
+        String tableAccessStr = verifiedClaims.get(Headers.HEADER_ACCESS);
+        if (tableAccessStr != null && !tableAccessStr.isBlank()) {
+            var tableAccess = SqlAuthorizer.parseTableAccess(tableAccessStr);
+            if (tableAccess.size() != 1) {
+                throw new UnauthorizedException(
+                        "RESTRICTED mode requires exactly one entry in 'access'; got " + tableAccess.size());
+            }
+            var entry = tableAccess.get(0);
+            return switch (entry.type()) {
+                case TableAccessEntry.TABLE -> {
+                    for (var cst : catalogSchemaTables) {
+                        if (cst.type() == Transformations.TableType.TABLE_FUNCTION) {
+                            throw new UnauthorizedException(
+                                    "Access type 'table' does not allow TABLE_FUNCTION queries");
+                        }
+                        if (!SqlAuthorizer.hasAccessToTable(database, schema, entry.name(), cst)) {
+                            throw new UnauthorizedException("No access to %s".formatted(cst));
+                        }
+                    }
+                    yield SqlAuthorizer.addFilterToBaseTable(updatedQuery, entry.filter());
+                }
+                case TableAccessEntry.PATH -> {
+                    for (var cst : catalogSchemaTables) {
+                        if (cst.type() == Transformations.TableType.BASE_TABLE) {
+                            throw new UnauthorizedException(
+                                    "Access type 'path' does not allow BASE_TABLE queries");
+                        }
+                        if (!SqlAuthorizer.hasAccessToPath(entry.name(), cst.tableOrPath())) {
+                            throw new UnauthorizedException("No access to %s".formatted(cst));
+                        }
+                    }
+                    yield SqlAuthorizer.addFilterToTableFunction(updatedQuery, entry.filter());
+                }
+                case TableAccessEntry.FUNCTION -> {
+                    for (var cst : catalogSchemaTables) {
+                        if (cst.type() == Transformations.TableType.BASE_TABLE) {
+                            throw new UnauthorizedException(
+                                    "Access type 'function' does not allow BASE_TABLE queries");
+                        }
+                        if (!SqlAuthorizer.hasAccessToTableFunction(entry.name(), cst.functionName())) {
+                            throw new UnauthorizedException("No access to %s".formatted(cst));
+                        }
+                    }
+                    yield SqlAuthorizer.addFilterToTableFunction(updatedQuery, entry.filter());
+                }
+                default -> throw new UnauthorizedException("Unknown access type: " + entry.type());
+            };
+        }
+
+        // Fallback: legacy table/path/filter claims
         var path = verifiedClaims.get(Headers.HEADER_PATH);
         var functionName = verifiedClaims.get(Headers.HEADER_FUNCTION);
         var table = verifiedClaims.get(Headers.HEADER_TABLE);
@@ -84,23 +136,18 @@ public class JwtClaimBasedAuthorizer implements SqlAuthorizer {
             throw new UnauthorizedException("No access to %s".formatted(catalogSchemaTables));
         }
 
-        // Authorize all tables/paths (handles list_value with multiple paths)
         for (var catalogSchemaTable : catalogSchemaTables) {
-            // Check function access
             if (catalogSchemaTable.type() == Transformations.TableType.TABLE_FUNCTION &&
                     (path == null || !SqlAuthorizer.hasAccessToPath(path, catalogSchemaTable.tableOrPath())) &&
                     !SqlAuthorizer.hasAccessToTableFunction(functionName, catalogSchemaTable.functionName())){
                 throw new UnauthorizedException("No access to %s".formatted(catalogSchemaTable));
             }
-
-            // Check table access
             if (catalogSchemaTable.type() == Transformations.TableType.BASE_TABLE &&
                     (table == null || !SqlAuthorizer.hasAccessToTable(database, schema, table, catalogSchemaTable))){
                 throw new UnauthorizedException("No access to %s".formatted(catalogSchemaTable));
             }
         }
 
-        // Use first entry for type determination (all entries should have same type for single table function)
         var catalogSchemaTable = catalogSchemaTables.get(0);
         var filter = verifiedClaims.get(Headers.HEADER_FILTER);
         if (filter == null) {
@@ -108,15 +155,9 @@ public class JwtClaimBasedAuthorizer implements SqlAuthorizer {
         }
         JsonNode compiledFilter = SqlAuthorizer.compileFilterString(filter);
         switch (catalogSchemaTable.type()) {
-            case TABLE_FUNCTION -> {
-                return SqlAuthorizer.addFilterToTableFunction(updatedQuery, compiledFilter);
-            }
-            case BASE_TABLE -> {
-                return SqlAuthorizer.addFilterToBaseTable(updatedQuery, compiledFilter);
-            }
-            default -> {
-                return null;
-            }
+            case TABLE_FUNCTION -> { return SqlAuthorizer.addFilterToTableFunction(updatedQuery, compiledFilter); }
+            case BASE_TABLE    -> { return SqlAuthorizer.addFilterToBaseTable(updatedQuery, compiledFilter); }
+            default            -> { return null; }
         }
     }
 

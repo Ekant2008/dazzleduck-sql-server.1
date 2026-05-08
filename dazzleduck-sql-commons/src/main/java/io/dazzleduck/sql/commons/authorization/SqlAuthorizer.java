@@ -2,6 +2,7 @@ package io.dazzleduck.sql.commons.authorization;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.NullNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.dazzleduck.sql.commons.authorization.UnauthorizedException;
@@ -10,15 +11,31 @@ import io.dazzleduck.sql.commons.ExpressionFactory;
 import io.dazzleduck.sql.commons.Transformations;
 import java.util.function.Function;
 import java.sql.SQLException;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 public interface SqlAuthorizer {
 
+    ObjectMapper TABLE_ACCESS_MAPPER = new ObjectMapper();
+
     SqlAuthorizer NOOP_AUTHORIZER = NOOPAuthorizer.INSTANCE;
 
-    SqlAuthorizer JWT_AUTHORIZER = JwtClaimBasedAuthorizer.INSTANCE;
+    SqlAuthorizer RESTRICTED_DATASOURCE_AUTHORIZER = RestrictedDatasourceOnlyAuthorizer.INSTANCE;
 
     SqlAuthorizer SELECT_ONLY_AUTHORIZER = SelectOnlyAuthorizer.INSTANCE;
+
+    SqlAuthorizer RESTRICT_READ_ONLY_AUTHORIZER = RestrictedReadOnlyAuthorizer.INSTANCE;
+
+    static JsonNode addFilterViaCtes(JsonNode query, JsonNode filter) {
+        return Transformations.injectFilterCtes(query, filter);
+    }
+
+    static JsonNode addFilterViaCtes(JsonNode query, java.util.Map<String, JsonNode> tableFilters) {
+        return Transformations.injectFilterCtes(query, tableFilters);
+    }
 
     static JsonNode addFilterToTableFunction(JsonNode query, JsonNode toAdd) {
         var statement = Transformations.getFirstStatementNode(query);
@@ -56,6 +73,55 @@ public interface SqlAuthorizer {
             return res;
         }
         return null;
+    }
+
+    Set<String> VALID_ACCESS_TYPES = Set.of(TableAccessEntry.TABLE, TableAccessEntry.PATH, TableAccessEntry.FUNCTION);
+
+    /**
+     * Parses the {@code access} claim: {@code [[type, name, projection, filter], ...]}.
+     * All four elements are required per entry:
+     * <ul>
+     *   <li><b>type</b>       — {@code "table"}, {@code "path"}, or {@code "function"}</li>
+     *   <li><b>name</b>       — table name, path prefix, or function name</li>
+     *   <li><b>projection</b> — must be {@code "*"} (column restriction not yet implemented)</li>
+     *   <li><b>filter</b>     — SQL WHERE expression; use {@code "true"} for no row restriction</li>
+     * </ul>
+     */
+    static List<TableAccessEntry> parseTableAccess(String json) throws UnauthorizedException {
+        try {
+            JsonNode root = TABLE_ACCESS_MAPPER.readTree(json);
+            if (!root.isArray()) {
+                throw new UnauthorizedException("'access' must be a JSON array of [type, name, projection, filter] tuples");
+            }
+            List<TableAccessEntry> result = new ArrayList<>();
+            for (int i = 0; i < root.size(); i++) {
+                JsonNode entry = root.get(i);
+                if (!entry.isArray() || entry.size() != 4) {
+                    throw new UnauthorizedException(
+                            "'access' entry " + i + " must have exactly 4 elements: [type, name, projection, filter]");
+                }
+                String type       = entry.get(0).asText();
+                String name       = entry.get(1).asText();
+                String projection = entry.get(2).asText();
+                String filter     = entry.get(3).asText();
+                if (!VALID_ACCESS_TYPES.contains(type)) {
+                    throw new UnauthorizedException(
+                            "'access' entry " + i + " has unknown type \"" + type +
+                            "\"; must be one of: " + VALID_ACCESS_TYPES);
+                }
+                if (!"*".equals(projection)) {
+                    throw new UnauthorizedException(
+                            "Column projection is not yet supported; use \"*\" for entry " + i +
+                            " (got: \"" + projection + "\")");
+                }
+                result.add(new TableAccessEntry(type, name, compileFilterString(filter)));
+            }
+            return result;
+        } catch (UnauthorizedException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new UnauthorizedException("Failed to parse 'access' claim: " + e.getMessage());
+        }
     }
 
     static JsonNode compileFilterString(String stringFilter) {

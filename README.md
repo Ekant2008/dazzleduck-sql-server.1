@@ -349,7 +349,7 @@ All validators run on every request and all failures are collected before return
 
 ## Security and Access Modes
 
-DazzleDuck SQL Server supports three access modes that control query permissions and external access capabilities:
+DazzleDuck SQL Server supports four access modes that control query permissions and external access capabilities:
 
 ### Access Modes
 
@@ -357,7 +357,8 @@ DazzleDuck SQL Server supports three access modes that control query permissions
 |-------|-------------|---------------------|-----------------|
 | **COMPLETE** | Full access to all SQL operations | All (INSERT, UPDATE, DELETE, CREATE, DROP, etc.) | Enabled by default |
 | **READ_ONLY** | Only SELECT queries allowed | SELECT, UNION, CTE, subqueries, joins, aggregates | Controlled by startup script |
-| **RESTRICTED** | Only SELECT on one table (requires JWT claims) | SELECT on specific table only | Controlled by startup script |
+| **RESTRICTED** | SELECT on one datasource; table/path/function scoped via JWT | SELECT on the authorized datasource only | Controlled by startup script |
+| **RESTRICT_READ_ONLY** | SELECT on any table; mandatory per-table filter always injected | SELECT on any table (filter always applied) | Disabled by default |
 
 ### Configuring Access Mode
 
@@ -365,7 +366,7 @@ Set the access mode in `application.conf` or via command-line:
 
 ```hocon
 dazzleduck_server {
-    access_mode = COMPLETE  # Options: COMPLETE, READ_ONLY, RESTRICTED
+    access_mode = COMPLETE  # Options: COMPLETE, READ_ONLY, RESTRICTED, RESTRICT_READ_ONLY
 }
 ```
 
@@ -379,17 +380,17 @@ External access refers to DuckDB's ability to access external tables and functio
 **By access mode:**
 
 - **COMPLETE mode**: All external tables and functions are accessible by default
-- **READ_ONLY/RESTRICTED modes**: External access must be explicitly enabled in startup script
+- **READ_ONLY / RESTRICTED / RESTRICT_READ_ONLY modes**: External access must be explicitly enabled in startup script
 
 ```sql
--- Disable external access (recommended for read-only modes)
+-- Disable external access (recommended for restricted modes)
 SET enable_external_access = false;
 
--- Enable external access (use with caution in read-only modes)
+-- Enable external access (use with caution)
 SET enable_external_access = true;
 ```
 
-This security feature prevents read-only users from accessing arbitrary external data sources while still allowing them to query authorized tables. Configure external access in the startup script:
+This security feature prevents restricted users from accessing arbitrary external data sources while still allowing them to query authorized tables. Configure external access in the startup script:
 
 ```hocon
 startup_script_provider {
@@ -406,22 +407,58 @@ startup_script_provider {
 
 ### JWT Claims for RESTRICTED Mode
 
-When using `RESTRICTED` access mode, queries must include these JWT claims in headers:
+When using `RESTRICTED` access mode, the preferred way to specify access is the `access` JWT claim.
 
-| Claim | Header Name | Description |
-|--------|--------------|-------------|
-| `database` | `database` | Target database name |
-| `schema` | `schema` | Target schema name |
-| `table` | `table` | Target table name |
+**`access` claim — format: `[[type, name, projection, filter]]` (exactly one entry)**
 
-Example:
+| Element | Values | Description |
+|---------|--------|-------------|
+| `type` | `"table"`, `"path"`, `"function"` | Datasource kind |
+| `name` | table name / path prefix / function name | The authorized datasource |
+| `projection` | `"*"` | Column restriction (reserved, must be `"*"`) |
+| `filter` | SQL expression or `"true"` | Row-level filter; `"true"` = no restriction |
+
+Examples:
 ```bash
-curl -H "database: mydb" \
-     -H "schema: myschema" \
-     -H "table: mytable" \
-     -H "Authorization: Bearer <jwt-token>" \
-     "http://localhost:8081/v1/query?q=SELECT%20*%20FROM%20mytable"
+# BASE_TABLE access with filter
+-H 'access: [["table","orders","*","tenant_id='\''abc'\''"]]]'
+
+# Path-prefix access (TABLE_FUNCTION)
+-H 'access: [["path","s3://bucket/tenant1/","*","true"]]'
+
+# Named function access
+-H 'access: [["function","read_parquet","*","tenant_id='\''abc'\''"]]]'
 ```
+
+**Legacy claims (backward compatible):**
+
+| Claim | Description |
+|-------|-------------|
+| `database` | Target database/catalog name |
+| `schema` | Target schema name |
+| `table` | Authorized table name (BASE_TABLE) |
+| `path` | Authorized path prefix (TABLE_FUNCTION) |
+| `filter` | Optional row filter expression |
+
+### JWT Claims for RESTRICT_READ_ONLY Mode
+
+`RESTRICT_READ_ONLY` allows SELECT on any table but **always injects the filter** into every base table via CTEs — including JOIN arms, WHERE subqueries, and EXISTS clauses.
+
+**`access` claim — format: `[[type, name, projection, filter], ...]` (one or more `"table"` entries)**
+
+```bash
+# Single table
+-H 'access: [["table","orders","*","tenant_id='\''abc'\''"]]]'
+
+# Multiple tables with different filter columns (CROSS JOIN-safe)
+-H 'access: [["table","orders","*","owner_id='\''alice'\''"],["table","items","*","region='\''us'\''"]]]'
+```
+
+**Legacy — `filter` + `table` claims (single table only):**
+```bash
+-H "table: orders" -H "filter: tenant_id='abc'"
+```
+The filter is mandatory — requests without `access` or `filter` are rejected.
 
 ## SSL / TLS Configuration
 

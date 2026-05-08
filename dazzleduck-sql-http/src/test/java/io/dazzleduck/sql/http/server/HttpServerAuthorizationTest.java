@@ -105,7 +105,7 @@ public class HttpServerAuthorizationTest extends HttpServerTestBase {
 
     @Test
     public void testHasWriteAccessWithWriteAccessType() {
-        var authorizer = SqlAuthorizer.JWT_AUTHORIZER;
+        var authorizer = SqlAuthorizer.RESTRICTED_DATASOURCE_AUTHORIZER;
         var claims = Map.of(
                 Headers.HEADER_ACCESS_TYPE, AccessType.WRITE.name(),
                 Headers.QUERY_PARAMETER_INGESTION_QUEUE, "data_ingestion"
@@ -116,7 +116,7 @@ public class HttpServerAuthorizationTest extends HttpServerTestBase {
 
     @Test
     public void testHasWriteAccessWithoutWriteAccessType() {
-        var authorizer = SqlAuthorizer.JWT_AUTHORIZER;
+        var authorizer = SqlAuthorizer.RESTRICTED_DATASOURCE_AUTHORIZER;
         var claims = Map.of(
                 Headers.HEADER_PATH, "data/ingestion"
         );
@@ -125,7 +125,7 @@ public class HttpServerAuthorizationTest extends HttpServerTestBase {
 
     @Test
     public void testHasWriteAccessWithReadAccessType() {
-        var authorizer = SqlAuthorizer.JWT_AUTHORIZER;
+        var authorizer = SqlAuthorizer.RESTRICTED_DATASOURCE_AUTHORIZER;
         var claims = Map.of(
                 Headers.HEADER_ACCESS_TYPE, AccessType.READ.name(),
                 Headers.HEADER_PATH, "data/ingestion"
@@ -135,7 +135,7 @@ public class HttpServerAuthorizationTest extends HttpServerTestBase {
 
     @Test
     public void testHasWriteAccessWithUnauthorizedPath() {
-        var authorizer = SqlAuthorizer.JWT_AUTHORIZER;
+        var authorizer = SqlAuthorizer.RESTRICTED_DATASOURCE_AUTHORIZER;
         var claims = Map.of(
                 Headers.HEADER_ACCESS_TYPE, AccessType.WRITE.name(),
                 Headers.HEADER_PATH, "data/ingestion"
@@ -145,7 +145,7 @@ public class HttpServerAuthorizationTest extends HttpServerTestBase {
 
     @Test
     public void testHasWriteAccessWithoutPath() {
-        var authorizer = SqlAuthorizer.JWT_AUTHORIZER;
+        var authorizer = SqlAuthorizer.RESTRICTED_DATASOURCE_AUTHORIZER;
         var claims = Map.of(
                 Headers.HEADER_ACCESS_TYPE, AccessType.WRITE.name()
         );
