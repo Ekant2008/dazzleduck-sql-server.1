@@ -487,6 +487,36 @@ public class SelectOnlyFlightSqlTest {
         FlightTestUtils.testQuerySuccess(query, serverClient.flightSqlClient(), serverClient.clientAllocator());
     }
 
+    // ===== Prepared Statement Tests =====
+
+    @Test
+    @Timeout(value = 30, unit = TimeUnit.SECONDS)
+    public void testPreparedStatement_selectAllowed() throws Exception {
+        try (var ps = serverClient.flightSqlClient().prepare("SELECT 1 AS n")) {
+            var info = ps.execute();
+            try (var stream = serverClient.flightSqlClient()
+                    .getStream(info.getEndpoints().get(0).getTicket())) {
+                assertTrue(stream.next());
+            }
+        }
+    }
+
+    @Test
+    @Timeout(value = 30, unit = TimeUnit.SECONDS)
+    public void testPreparedStatement_insertRejected() {
+        assertThrows(FlightRuntimeException.class,
+                () -> serverClient.flightSqlClient().prepare(
+                        "INSERT INTO t_select_only VALUES (99, 'x')"));
+    }
+
+    @Test
+    @Timeout(value = 30, unit = TimeUnit.SECONDS)
+    public void testPreparedStatement_dmlUpdateBlocked() throws Exception {
+        try (var ps = serverClient.flightSqlClient().prepare("SELECT 1")) {
+            assertThrows(FlightRuntimeException.class, () -> ps.executeUpdate());
+        }
+    }
+
     // ===== hasWriteAccess Test =====
 
     @Test

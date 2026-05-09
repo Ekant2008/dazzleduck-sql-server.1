@@ -2,31 +2,22 @@ package io.dazzleduck.sql.flight.server;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
-import com.google.protobuf.ByteString;
 import io.dazzleduck.sql.commons.Transformations;
 import io.dazzleduck.sql.commons.authorization.AccessMode;
 import io.dazzleduck.sql.commons.authorization.UnauthorizedException;
 import io.dazzleduck.sql.commons.ingestion.IngestionHandler;
-import io.dazzleduck.sql.commons.planner.SplitPlanner;
 import io.dazzleduck.sql.flight.FlightRecorder;
-import io.dazzleduck.sql.flight.ingestion.IngestionParameters;
-import io.dazzleduck.sql.flight.optimizer.QueryOptimizer;
 import org.apache.arrow.flight.*;
 import org.apache.arrow.flight.sql.impl.FlightSql;
 import org.apache.arrow.memory.BufferAllocator;
-import org.apache.arrow.memory.RootAllocator;
 
 import java.nio.file.Path;
 import java.sql.Connection;
-import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.sql.Statement;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.ScheduledExecutorService;
-
-import static com.google.protobuf.ByteString.copyFrom;
 
 public class SelectOnlyFlightSqlProducer extends DuckDBFlightSqlProducer {
     public SelectOnlyFlightSqlProducer(Location serverLocation, String producerId, String secretKey, BufferAllocator allocator, String warehousePath, AccessMode accessMode, Path tempDir, IngestionHandler postIngestionHandler, ScheduledExecutorService scheduledExecutorService, Duration queryTimeout, Duration maxQueryTimeout, Clock clock, FlightRecorder recorder, IngestionConfig ingestionConfig, List<Location> dataProcessorLocations) {
@@ -71,5 +62,25 @@ public class SelectOnlyFlightSqlProducer extends DuckDBFlightSqlProducer {
         var claims = getVerifiedClaims(context);
         var databaseSchema = getDatabaseSchema(context, getAccessMode());
         return authorizer.authorize(context.peerIdentity(), databaseSchema.database(), databaseSchema.schema(), tree, claims, limit, offset);
+    }
+
+    @Override
+    protected String transformPreparedStatementQuery(CallContext context, Connection connection, String query)
+            throws UnauthorizedException, JsonProcessingException, SQLException {
+        var tree = Transformations.parseToTree(connection, query);
+        var authorizer = getSqlAuthorizer();
+        var claims = getVerifiedClaims(context);
+        var databaseSchema = getDatabaseSchema(context, getAccessMode());
+        var authorized = authorizer.authorize(
+                context.peerIdentity(), databaseSchema.database(), databaseSchema.schema(), tree, claims);
+        return Transformations.parseToSql(connection, authorized);
+    }
+
+    @Override
+    public Runnable acceptPutPreparedStatementUpdate(
+            FlightSql.CommandPreparedStatementUpdate command,
+            CallContext context, FlightStream flightStream,
+            StreamListener<PutResult> ackStream) {
+        return throwNotSupported("acceptPutPreparedStatementUpdate");
     }
 }

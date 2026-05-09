@@ -146,14 +146,40 @@ public class RestrictedReadOnlyFlightSqlTest {
                 filteredClient.flightSqlClient(), filteredClient.clientAllocator());
     }
 
-    // ── Blocked entry points (security hardening) ─────────────────────────────
+    // ── Prepared statement: SELECT allowed, filter injected at create time ───────
 
     @Test
     @Timeout(value = 30, unit = TimeUnit.SECONDS)
-    void createPreparedStatement_blocked() {
-        assertThrows(FlightRuntimeException.class,
-                () -> filteredClient.flightSqlClient().prepare("SELECT * FROM rro_orders"));
+    void preparedStatement_selectFiltered() throws Exception {
+        // Filter injected at createPreparedStatement; execution must return only alice's rows
+        String expected = "SELECT id FROM rro_orders WHERE owner_id = 'alice' ORDER BY id";
+        try (var ps = filteredClient.flightSqlClient().prepare("SELECT id FROM rro_orders ORDER BY id")) {
+            FlightTestUtils.testStream(expected,
+                    () -> filteredClient.flightSqlClient()
+                            .getStream(ps.execute().getEndpoints().get(0).getTicket()),
+                    filteredClient.clientAllocator());
+        }
     }
+
+    @Test
+    @Timeout(value = 30, unit = TimeUnit.SECONDS)
+    void preparedStatement_insertRejected() {
+        assertThrows(FlightRuntimeException.class,
+                () -> filteredClient.flightSqlClient().prepare(
+                        "INSERT INTO rro_orders VALUES (99, 'alice', 999)"));
+    }
+
+    @Test
+    @Timeout(value = 30, unit = TimeUnit.SECONDS)
+    void preparedStatement_dmlUpdateBlocked() throws Exception {
+        // acceptPutPreparedStatementUpdate must be rejected even for a valid prepared SELECT handle
+        try (var ps = filteredClient.flightSqlClient().prepare("SELECT id FROM rro_orders")) {
+            assertThrows(FlightRuntimeException.class,
+                    () -> ps.executeUpdate());
+        }
+    }
+
+    // ── Raw-SQL schema probe still blocked ────────────────────────────────────
 
     @Test
     @Timeout(value = 30, unit = TimeUnit.SECONDS)
