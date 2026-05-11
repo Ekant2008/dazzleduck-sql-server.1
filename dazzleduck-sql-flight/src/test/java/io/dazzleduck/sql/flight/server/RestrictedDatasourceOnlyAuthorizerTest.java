@@ -24,7 +24,7 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 
-public class JwtClaimBasedAuthorizerTest {
+public class RestrictedDatasourceOnlyAuthorizerTest {
 
     public static final String TEST_CATALOG = "test_jwt_catalog";
     public static final String TEST_SCHEMA = "test_jwt_schema";
@@ -127,7 +127,7 @@ public class JwtClaimBasedAuthorizerTest {
 
     @Test
     public void testHasWriteAccessWithWriteAccessType() {
-        var authorizer = SqlAuthorizer.JWT_AUTHORIZER;
+        var authorizer = SqlAuthorizer.RESTRICTED_DATASOURCE_AUTHORIZER;
         var claims = Map.of(
                 Headers.HEADER_ACCESS_TYPE, AccessType.WRITE.name(),
                 Headers.QUERY_PARAMETER_INGESTION_QUEUE, "ingestion_queue1"
@@ -137,7 +137,7 @@ public class JwtClaimBasedAuthorizerTest {
 
     @Test
     public void testHasWriteAccessWithoutWriteAccessType() {
-        var authorizer = SqlAuthorizer.JWT_AUTHORIZER;
+        var authorizer = SqlAuthorizer.RESTRICTED_DATASOURCE_AUTHORIZER;
         var claims = Map.of(
                 Headers.HEADER_PATH, "example/data/hive_table"
         );
@@ -146,7 +146,7 @@ public class JwtClaimBasedAuthorizerTest {
 
     @Test
     public void testHasWriteAccessWithReadAccessType() {
-        var authorizer = SqlAuthorizer.JWT_AUTHORIZER;
+        var authorizer = SqlAuthorizer.RESTRICTED_DATASOURCE_AUTHORIZER;
         var claims = Map.of(
                 Headers.HEADER_ACCESS_TYPE, AccessType.READ.name(),
                 Headers.HEADER_PATH, "example/data/hive_table"
@@ -156,7 +156,7 @@ public class JwtClaimBasedAuthorizerTest {
 
     @Test
     public void testHasWriteAccessWithUnauthorizedPath() {
-        var authorizer = SqlAuthorizer.JWT_AUTHORIZER;
+        var authorizer = SqlAuthorizer.RESTRICTED_DATASOURCE_AUTHORIZER;
         var claims = Map.of(
                 Headers.HEADER_ACCESS_TYPE, AccessType.WRITE.name(),
                 Headers.HEADER_PATH, "example/data/hive_table"
@@ -166,7 +166,7 @@ public class JwtClaimBasedAuthorizerTest {
 
     @Test
     public void testHasWriteAccessWithoutPath() {
-        var authorizer = SqlAuthorizer.JWT_AUTHORIZER;
+        var authorizer = SqlAuthorizer.RESTRICTED_DATASOURCE_AUTHORIZER;
         var claims = Map.of(
                 Headers.HEADER_ACCESS_TYPE, AccessType.WRITE.name()
         );

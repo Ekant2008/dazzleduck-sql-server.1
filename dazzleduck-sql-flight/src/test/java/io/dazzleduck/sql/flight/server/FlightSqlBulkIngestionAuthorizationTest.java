@@ -36,7 +36,7 @@ import static org.junit.jupiter.api.Assertions.*;
 /**
  * Integration tests for Flight SQL bulk ingestion authorization.
  *
- * Verifies that the JwtClaimBasedAuthorizer enforces write access by
+ * Verifies that the RestrictedDatasourceOnlyAuthorizer enforces write access by
  * checking the ingestion_queue claim embedded in the JWT at login time.
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)

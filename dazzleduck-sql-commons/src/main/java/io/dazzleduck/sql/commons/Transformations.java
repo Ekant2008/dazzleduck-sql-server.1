@@ -11,6 +11,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.util.*;
+import java.util.function.BiFunction;
 import java.util.function.Consumer;
 import java.util.function.Function;
 
@@ -89,24 +90,6 @@ public class Transformations {
     }
 
     public static Function<JsonNode, Boolean> isTableFunction(String functionName) {
-        return n -> {
-            if (n == null || functionName == null) {
-                return false;
-            }
-            var function = n.get(FIELD_FUNCTION);
-            if (function == null) {
-                return false;
-            }
-            JsonNode functionNameNode = function.get(FIELD_FUNCTION_NAME);
-            if (functionNameNode == null) {
-                return false;
-            }
-            return isType(TABLE_FUNCTION_TYPE).apply(n)
-                    && functionName.equals(functionNameNode.asText());
-        };
-    }
-
-    public static Function<JsonNode, Boolean> isBaseTable(String functionName) {
         return n -> {
             if (n == null || functionName == null) {
                 return false;
@@ -338,98 +321,62 @@ public class Transformations {
      * @return true if the node represents an upper bound, false otherwise
      */
     public static boolean isUpperBound(JsonNode node) {
-        if (node == null) {
-            return false;
-        }
-        JsonNode left = node.get("left");
-        JsonNode right = node.get("right");
-        JsonNode classNode = node.get(FIELD_CLASS);
-        JsonNode typeNode = node.get(FIELD_TYPE);
-
-        if (classNode == null || typeNode == null) {
-            return false;
-        }
-
-        String clazz = classNode.asText();
-        String type = typeNode.asText();
-        return (IS_REFERENCE.apply(left) && IS_CONSTANT.apply(right) && clazz.equals(COMPARISON_CLASS)
-                && (type.equals(COMPARE_TYPE_LESSTHAN) || type.equals(COMPARE_TYPE_LESSTHANOREQUALTO) || type.equals(COMPARE_TYPE_EQUAL))
-                || IS_REFERENCE.apply(right) && IS_CONSTANT.apply(left) && clazz.equals(COMPARISON_CLASS)
-                && (type.equals(COMPARE_TYPE_GREATERTHAN) || type.equals(COMPARE_TYPE_GREATERTHANOREQUALTO) || type.equals(COMPARE_TYPE_EQUAL)));
+        return isBound(node,
+                Set.of(COMPARE_TYPE_LESSTHAN, COMPARE_TYPE_LESSTHANOREQUALTO, COMPARE_TYPE_EQUAL),
+                Set.of(COMPARE_TYPE_GREATERTHAN, COMPARE_TYPE_GREATERTHANOREQUALTO, COMPARE_TYPE_EQUAL));
     }
 
-
-    /**
-     * Checks if a comparison node represents a lower bound predicate.
-     * <p>Matches patterns like:
-     * <ul>
-     *   <li>a &gt; 10</li>
-     *   <li>a &gt;= 10</li>
-     *   <li>10 &lt; a</li>
-     *   <li>10 &lt;= a</li>
-     *   <li>a = 10</li>
-     *   <li>10 = a</li>
-     * </ul>
-     *
-     * @param node the comparison node to check
-     * @return true if the node represents a lower bound, false otherwise
-     */
     public static boolean isLowerBound(JsonNode node) {
-        if (node == null) {
-            return false;
-        }
-        JsonNode left = node.get("left");
-        JsonNode right = node.get("right");
+        return isBound(node,
+                Set.of(COMPARE_TYPE_GREATERTHAN, COMPARE_TYPE_GREATERTHANOREQUALTO, COMPARE_TYPE_EQUAL),
+                Set.of(COMPARE_TYPE_LESSTHAN, COMPARE_TYPE_LESSTHANOREQUALTO, COMPARE_TYPE_EQUAL));
+    }
+
+    private static boolean isBound(JsonNode node, Set<String> forwardTypes, Set<String> reverseTypes) {
+        if (node == null) return false;
+        JsonNode left  = node.get(FIELD_LEFT);
+        JsonNode right = node.get(FIELD_RIGHT);
         JsonNode classNode = node.get(FIELD_CLASS);
-        JsonNode typeNode = node.get(FIELD_TYPE);
-
-        if (classNode == null || typeNode == null) {
-            return false;
-        }
-
+        JsonNode typeNode  = node.get(FIELD_TYPE);
+        if (classNode == null || typeNode == null) return false;
         String clazz = classNode.asText();
-        String type = typeNode.asText();
-        return (IS_REFERENCE.apply(left) && IS_CONSTANT.apply(right) && clazz.equals(COMPARISON_CLASS)
-                && (type.equals(COMPARE_TYPE_GREATERTHAN) || type.equals(COMPARE_TYPE_GREATERTHANOREQUALTO) || type.equals(COMPARE_TYPE_EQUAL))
-                || IS_REFERENCE.apply(right) && IS_CONSTANT.apply(left) && clazz.equals(COMPARISON_CLASS)
-                && (type.equals(COMPARE_TYPE_LESSTHAN) || type.equals(COMPARE_TYPE_LESSTHANOREQUALTO) || type.equals(COMPARE_TYPE_EQUAL)));
+        String type  = typeNode.asText();
+        return (IS_REFERENCE.apply(left)  && IS_CONSTANT.apply(right) && clazz.equals(COMPARISON_CLASS) && forwardTypes.contains(type))
+            || (IS_REFERENCE.apply(right) && IS_CONSTANT.apply(left)  && clazz.equals(COMPARISON_CLASS) && reverseTypes.contains(type));
     }
 
 
-    /**
-     *  if(max_a=null, true, cast(min_a as int) &lt;= cast(x as int)
-     **/
-    public static JsonNode constructUpperBoundPredicate(String[] minCol, JsonNode literal, String datatype) {
-        JsonNode nullNode = ExpressionFactory.constant(null);
-        JsonNode referenceNode = ExpressionFactory.reference(minCol);
-        JsonNode ifCondition = ExpressionFactory.equalExpr(referenceNode, nullNode);
+    /** if(col=null, true, cast(col as T) OP cast(literal as T)) */
+    private static JsonNode constructBoundPredicate(String[] col, JsonNode literal, String datatype,
+                                                     BiFunction<JsonNode, JsonNode, JsonNode> comparison) {
+        JsonNode refNode = ExpressionFactory.reference(col);
+        JsonNode ifCondition = ExpressionFactory.equalExpr(refNode, ExpressionFactory.constant(null));
         JsonNode then = ExpressionFactory.cast(ExpressionFactory.constant("t"), "BOOLEAN");
-        JsonNode elseExpression = ExpressionFactory.lessThanOrEqualExpr(ExpressionFactory.cast(referenceNode.deepCopy(), datatype), ExpressionFactory.cast(literal, datatype));
-        return ExpressionFactory.ifExpr(ifCondition, then, elseExpression);
+        JsonNode elseExpr = comparison.apply(
+                ExpressionFactory.cast(refNode.deepCopy(), datatype),
+                ExpressionFactory.cast(literal, datatype));
+        return ExpressionFactory.ifExpr(ifCondition, then, elseExpr);
+    }
+
+    /** if(min_col=null, true, cast(min_col as T) &lt;= cast(x as T)) */
+    public static JsonNode constructUpperBoundPredicate(String[] minCol, JsonNode literal, String datatype) {
+        return constructBoundPredicate(minCol, literal, datatype, ExpressionFactory::lessThanOrEqualExpr);
+    }
+
+    /** if(max_col=null, true, cast(max_col as T) &gt;= cast(x as T)) */
+    public static JsonNode constructLowerBoundPredicate(String[] maxCol, JsonNode literal, String datatype) {
+        return constructBoundPredicate(maxCol, literal, datatype, ExpressionFactory::greaterThanOrEqualExpr);
     }
 
     public static JsonNode constructEqualPredicate(String[] minCol, String[] maxCol, JsonNode literal, String datatype) {
-        JsonNode nullNode = ExpressionFactory.constant(null);
-        JsonNode minReferenceNode = ExpressionFactory.reference(minCol);
-        JsonNode maxReferenceNode = ExpressionFactory.reference(maxCol);
-        JsonNode ifCondition = ExpressionFactory.equalExpr(minReferenceNode, nullNode);
+        JsonNode minRef = ExpressionFactory.reference(minCol);
+        JsonNode maxRef = ExpressionFactory.reference(maxCol);
+        JsonNode ifCondition = ExpressionFactory.equalExpr(minRef, ExpressionFactory.constant(null));
         JsonNode then = ExpressionFactory.cast(ExpressionFactory.constant("t"), "BOOLEAN");
-        JsonNode elseRightExpression = ExpressionFactory.lessThanOrEqualExpr(ExpressionFactory.cast(literal, datatype), ExpressionFactory.cast(maxReferenceNode.deepCopy(), datatype));
-        JsonNode elseLeftExpression = ExpressionFactory.lessThanOrEqualExpr(ExpressionFactory.cast(minReferenceNode.deepCopy(), datatype), ExpressionFactory.cast(literal, datatype));
-        JsonNode andExpression = ExpressionFactory.andFilters(elseLeftExpression, elseRightExpression);
-        return ExpressionFactory.ifExpr(ifCondition, then, andExpression);
-    }
-
-    /**
-     *  if(min_a=null, true, cast(max_a as int) &lt;= cast(x as int)
-     **/
-    public static JsonNode constructLowerBoundPredicate(String[] maxCol, JsonNode literal, String datatype) {
-        JsonNode nullNode = ExpressionFactory.constant(null);
-        JsonNode referenceNode = ExpressionFactory.reference(maxCol);
-        JsonNode ifCondition = ExpressionFactory.equalExpr(referenceNode, nullNode);
-        JsonNode then = ExpressionFactory.cast(ExpressionFactory.constant("t"), "BOOLEAN");
-        JsonNode elseExpression = ExpressionFactory.greaterThanOrEqualExpr(ExpressionFactory.cast(referenceNode.deepCopy(), datatype), ExpressionFactory.cast(literal, datatype));
-        return ExpressionFactory.ifExpr(ifCondition, then, elseExpression);
+        JsonNode elseExpr = ExpressionFactory.andFilters(
+                ExpressionFactory.lessThanOrEqualExpr(ExpressionFactory.cast(minRef.deepCopy(), datatype), ExpressionFactory.cast(literal, datatype)),
+                ExpressionFactory.lessThanOrEqualExpr(ExpressionFactory.cast(literal, datatype), ExpressionFactory.cast(maxRef.deepCopy(), datatype)));
+        return ExpressionFactory.ifExpr(ifCondition, then, elseExpr);
     }
 
 
@@ -509,29 +456,16 @@ public class Transformations {
         return node;
     }
 
-    public static List<JsonNode> collectLiterals(JsonNode tree) {
+    public static List<JsonNode> collect(JsonNode tree, Function<JsonNode, Boolean> matchFn) {
         final List<JsonNode> list = new ArrayList<>();
-        find(tree, IS_CONSTANT, list::add);
+        find(tree, matchFn, list::add);
         return list;
     }
 
-    public static List<JsonNode> collectFunction(JsonNode tree, String functionName) {
-        final List<JsonNode> list = new ArrayList<>();
-        find(tree, isFunction(functionName), list::add);
-        return list;
-    }
-
-    public static List<JsonNode> collectReferences(JsonNode tree) {
-        final List<JsonNode> list = new ArrayList<>();
-        find(tree, IS_REFERENCE, list::add);
-        return list;
-    }
-
-    public static List<JsonNode> collectSubQueries(JsonNode tree){
-        final List<JsonNode> list = new ArrayList<>();
-        find(tree, IS_SUBQUERY, list::add);
-        return list;
-    }
+    public static List<JsonNode> collectLiterals(JsonNode tree)                          { return collect(tree, IS_CONSTANT); }
+    public static List<JsonNode> collectFunction(JsonNode tree, String functionName)     { return collect(tree, isFunction(functionName)); }
+    public static List<JsonNode> collectReferences(JsonNode tree)                        { return collect(tree, IS_REFERENCE); }
+    public static List<JsonNode> collectSubQueries(JsonNode tree)                        { return collect(tree, IS_SUBQUERY); }
 
     public static void find(JsonNode node, Function<JsonNode, Boolean> matchFn,
                             Consumer<JsonNode> collectFn) {
@@ -632,11 +566,7 @@ public class Transformations {
         return ConnectionPool.collectFirst(sql, String.class);
     }
 
-    public static List<JsonNode> collectReferencesWithCast(JsonNode tree) {
-        ArrayList<JsonNode> result = new ArrayList<>();
-        find(tree, IS_REFERENCE_CAST, result::add);
-        return result;
-    }
+    public static List<JsonNode> collectReferencesWithCast(JsonNode tree)                { return collect(tree, IS_REFERENCE_CAST); }
 
     public static List<JsonNode> splitStatements(JsonNode tree) {
         ArrayNode statements = (ArrayNode) tree.get(FIELD_STATEMENTS);
@@ -655,6 +585,157 @@ public class Transformations {
         var  result = new ArrayList<CatalogSchemaTable>();
         getAllTablesOrPathsFromSelect(statement, catalogName, schemaName, result);
         return result;
+    }
+
+    /**
+     * Comprehensive table reference collector for security-critical access control.
+     *
+     * <p>Unlike {@link #getAllTablesOrPathsFromSelect}, this method walks the <em>entire</em>
+     * query AST — FROM clauses, JOIN conditions, CTE bodies, UNION/INTERSECT/EXCEPT branches,
+     * and expression-level subqueries (IN, EXISTS, scalar) in WHERE, HAVING, SELECT list,
+     * QUALIFY, GROUP BY, and ORDER BY — so that no table reference can be hidden from
+     * access control checks.
+     *
+     * <p>Do NOT use this method for partition pruning or split planning; those callers
+     * intentionally see only FROM-clause tables.
+     */
+    public static List<CatalogSchemaTable> collectAllTableReferences(JsonNode statement,
+                                                                      String catalogName,
+                                                                      String schemaName) {
+        var result = new ArrayList<CatalogSchemaTable>();
+        collectAllTableRefsFromStatement(statement, catalogName, schemaName, result, Set.of());
+        return result;
+    }
+
+    /**
+     * CTE-aware recursive collector.
+     *
+     * <p>{@code visibleCteNames} carries the CTE names that are in scope at the current nesting
+     * level. BASE_TABLE references whose name is in this set are CTE references (not real tables)
+     * and are skipped — the filter is enforced inside the CTE body instead. This prevents
+     * double-counted or incorrectly flagged references when the same query has already been
+     * transformed by {@link #injectFilterCtes} (which renames real tables to {@code ___xxx} CTEs).
+     */
+    private static void collectAllTableRefsFromStatement(JsonNode statement, String catalogName,
+                                                          String schemaName,
+                                                          List<CatalogSchemaTable> collector,
+                                                          Set<String> visibleCteNames) {
+        if (statement == null || statement instanceof NullNode) return;
+        String type = statement.get(FIELD_TYPE).asText();
+        if (NODE_TYPE_SELECT_NODE.equals(type)) {
+            // Build the set of CTE names visible in this SELECT scope
+            Set<String> localCteNames = new HashSet<>(visibleCteNames);
+            JsonNode cteMap = statement.get("cte_map");
+            if (cteMap != null) {
+                JsonNode map = cteMap.get("map");
+                if (map != null && map.isArray()) {
+                    for (JsonNode entry : map) {
+                        localCteNames.add(entry.get("key").asText());
+                        // Walk each CTE body so hidden tables inside them are captured
+                        collectAllTableRefsFromStatement(
+                                entry.get("value").get("query").get("node"),
+                                catalogName, schemaName, collector, localCteNames);
+                    }
+                }
+            }
+            // FROM clause — skip references that resolve to local CTEs
+            JsonNode fromTable = statement.get(FIELD_FROM_TABLE);
+            if (fromTable != null && !(fromTable instanceof NullNode)) {
+                collectAllTableRefsFromFromNode(fromTable, catalogName, schemaName, collector, localCteNames);
+            }
+            // Expression fields (WHERE, HAVING, SELECT list, etc.)
+            collectAllTableRefsFromExpressionFields(statement, catalogName, schemaName, collector, localCteNames);
+        } else if (NODE_TYPE_SET_OPERATION_NODE.equals(type)) {
+            collectAllTableRefsFromStatement(statement.get(FIELD_LEFT), catalogName, schemaName, collector, visibleCteNames);
+            collectAllTableRefsFromStatement(statement.get(FIELD_RIGHT), catalogName, schemaName, collector, visibleCteNames);
+        }
+    }
+
+    private static void collectAllTableRefsFromFromNode(JsonNode fromNode, String catalogName,
+                                                         String schemaName,
+                                                         List<CatalogSchemaTable> collector,
+                                                         Set<String> cteNames) {
+        if (fromNode == null || fromNode instanceof NullNode) return;
+        String type = fromNode.get(FIELD_TYPE).asText();
+        switch (type) {
+            case NODE_TYPE_BASE_TABLE -> {
+                String tableName = fromNode.get(FIELD_TABLE_NAME).asText();
+                if (cteNames.contains(tableName)) return; // CTE reference — body already walked
+                var schemaFromQuery = fromNode.get(FIELD_SCHEMA_NAME).asText();
+                var catalogFromQuery = fromNode.get(FIELD_CATALOG_NAME).asText();
+                var s = schemaFromQuery == null || schemaFromQuery.isEmpty() ? schemaName : schemaFromQuery;
+                var c = catalogFromQuery == null || catalogFromQuery.isEmpty() ? catalogName : catalogFromQuery;
+                collector.add(new CatalogSchemaTable(c, s, tableName, TableType.BASE_TABLE));
+            }
+            case NODE_TYPE_TABLE_FUNCTION -> {
+                var function = fromNode.get(FIELD_FUNCTION);
+                var functionName = function.get(FIELD_FUNCTION_NAME).asText();
+                var functionChildren = function.get(FIELD_CHILDREN);
+                if (functionChildren != null && functionChildren.isArray() && !functionChildren.isEmpty()) {
+                    extractPathsFromTableFunctionChild(functionChildren.get(0), functionName, collector);
+                }
+            }
+            case NODE_TYPE_JOIN -> {
+                collectAllTableRefsFromFromNode(fromNode.get(FIELD_LEFT), catalogName, schemaName, collector, cteNames);
+                collectAllTableRefsFromFromNode(fromNode.get(FIELD_RIGHT), catalogName, schemaName, collector, cteNames);
+                collectAllTableRefsFromExpression(fromNode.get("condition"), catalogName, schemaName, collector, cteNames);
+            }
+            case NODE_TYPE_SUBQUERY -> {
+                collectAllTableRefsFromStatement(
+                        fromNode.get(FIELD_SUBQUERY).get(FIELD_NODE), catalogName, schemaName, collector, cteNames);
+            }
+            case NODE_TYPE_SET_OPERATION_NODE -> {
+                collectAllTableRefsFromFromNode(fromNode.get(FIELD_LEFT), catalogName, schemaName, collector, cteNames);
+                collectAllTableRefsFromFromNode(fromNode.get(FIELD_RIGHT), catalogName, schemaName, collector, cteNames);
+            }
+        }
+    }
+
+    private static void collectAllTableRefsFromExpressionFields(JsonNode selectNode, String catalogName,
+                                                                  String schemaName,
+                                                                  List<CatalogSchemaTable> collector,
+                                                                  Set<String> cteNames) {
+        collectAllTableRefsFromExpression(selectNode.get(FIELD_WHERE_CLAUSE), catalogName, schemaName, collector, cteNames);
+        collectAllTableRefsFromExpression(selectNode.get("having"), catalogName, schemaName, collector, cteNames);
+        collectAllTableRefsFromExpression(selectNode.get("qualify"), catalogName, schemaName, collector, cteNames);
+        collectAllTableRefsFromExpression(selectNode.get("select_list"), catalogName, schemaName, collector, cteNames);
+        collectAllTableRefsFromExpression(selectNode.get("group_expressions"), catalogName, schemaName, collector, cteNames);
+        collectAllTableRefsFromExpression(selectNode.get("order_bys"), catalogName, schemaName, collector, cteNames);
+    }
+
+    private static void collectAllTableRefsFromExpression(JsonNode expr, String catalogName,
+                                                           String schemaName,
+                                                           List<CatalogSchemaTable> collector,
+                                                           Set<String> cteNames) {
+        if (expr == null || expr instanceof NullNode) return;
+        if (expr.isArray()) {
+            for (JsonNode element : expr) {
+                collectAllTableRefsFromExpression(element, catalogName, schemaName, collector, cteNames);
+            }
+            return;
+        }
+        if (!expr.isObject()) return;
+        JsonNode classNode = expr.get(FIELD_CLASS);
+        if (classNode != null && SUBQUERY_CLASS.equals(classNode.asText())) {
+            JsonNode subqueryContent = expr.get(FIELD_SUBQUERY);
+            if (subqueryContent != null) {
+                JsonNode innerNode = subqueryContent.get(FIELD_NODE);
+                if (innerNode != null) {
+                    collectAllTableRefsFromStatement(innerNode, catalogName, schemaName, collector, cteNames);
+                }
+            }
+            collectAllTableRefsFromExpression(expr.get(FIELD_CHILD), catalogName, schemaName, collector, cteNames);
+            return;
+        }
+        collectAllTableRefsFromExpression(expr.get(FIELD_LEFT), catalogName, schemaName, collector, cteNames);
+        collectAllTableRefsFromExpression(expr.get(FIELD_RIGHT), catalogName, schemaName, collector, cteNames);
+        collectAllTableRefsFromExpression(expr.get(FIELD_CHILDREN), catalogName, schemaName, collector, cteNames);
+        collectAllTableRefsFromExpression(expr.get(FIELD_CHILD), catalogName, schemaName, collector, cteNames);
+        collectAllTableRefsFromExpression(expr.get(FIELD_FILTER), catalogName, schemaName, collector, cteNames);
+        collectAllTableRefsFromExpression(expr.get(FIELD_WHEN_EXPR), catalogName, schemaName, collector, cteNames);
+        collectAllTableRefsFromExpression(expr.get(FIELD_THEN_EXPR), catalogName, schemaName, collector, cteNames);
+        collectAllTableRefsFromExpression(expr.get(FIELD_ELSE_EXPR), catalogName, schemaName, collector, cteNames);
+        collectAllTableRefsFromExpression(expr.get(FIELD_CASE_CHECKS), catalogName, schemaName, collector, cteNames);
     }
 
     public static JsonNode getFirstStatementNode(JsonNode jsonNode) {
@@ -679,47 +760,24 @@ public class Transformations {
 
     public static Function<JsonNode, JsonNode> FIRST_STATEMENT_NODE = Transformations::getFirstStatementNode;
 
-    public static JsonNode getTableFunction(JsonNode tree) {
-        var fromNode = tree.get(FIELD_FROM_TABLE);
-        var fromTableType = fromNode.get(FIELD_TYPE).asText();
-        switch (fromTableType) {
-            case NODE_TYPE_BASE_TABLE -> {
-                throw new IllegalStateException("Cannot get table function for BASE_TABLE node. Expected TABLE_FUNCTION or SUBQUERY. Tree: " + tree);
-            }
-            case NODE_TYPE_TABLE_FUNCTION -> {
-                return fromNode.get(FIELD_FUNCTION);
-            }
-            case NODE_TYPE_SUBQUERY -> {
-                var node = fromNode.get(FIELD_SUBQUERY).get(FIELD_NODE);
-                var type = node.get(FIELD_TYPE).asText();
-                if (type.equals(NODE_TYPE_SET_OPERATION_NODE)) {
-                    return getTableFunction(node.get(FIELD_RIGHT));
-                } else if (type.equals(NODE_TYPE_SELECT_NODE)) {
-                    return getTableFunction(node);
-                }
-                return null;
-            }
-        }
-        return null;
-    }
+    public static JsonNode getTableFunction(JsonNode tree)       { return getTableFunctionNode(tree, false); }
+    public static JsonNode getTableFunctionParent(JsonNode tree) { return getTableFunctionNode(tree, true); }
 
-    public static JsonNode getTableFunctionParent(JsonNode tree) {
+    private static JsonNode getTableFunctionNode(JsonNode tree, boolean returnParent) {
         var fromNode = tree.get(FIELD_FROM_TABLE);
         var fromTableType = fromNode.get(FIELD_TYPE).asText();
         switch (fromTableType) {
-            case NODE_TYPE_BASE_TABLE -> {
-                throw new IllegalStateException("Cannot get table function parent for BASE_TABLE node. Tree: " + tree);
-            }
-            case NODE_TYPE_TABLE_FUNCTION -> {
-                return fromNode;
-            }
+            case NODE_TYPE_BASE_TABLE -> throw new IllegalStateException(
+                    "Cannot get table function" + (returnParent ? " parent" : "") +
+                    " for BASE_TABLE node. Expected TABLE_FUNCTION or SUBQUERY. Tree: " + tree);
+            case NODE_TYPE_TABLE_FUNCTION -> { return returnParent ? fromNode : fromNode.get(FIELD_FUNCTION); }
             case NODE_TYPE_SUBQUERY -> {
                 var node = fromNode.get(FIELD_SUBQUERY).get(FIELD_NODE);
                 var type = node.get(FIELD_TYPE).asText();
                 if (type.equals(NODE_TYPE_SET_OPERATION_NODE)) {
-                    return getTableFunctionParent(node.get(FIELD_RIGHT));
+                    return getTableFunctionNode(node.get(FIELD_RIGHT), returnParent);
                 } else if (type.equals(NODE_TYPE_SELECT_NODE)) {
-                    return getTableFunctionParent(node);
+                    return getTableFunctionNode(node, returnParent);
                 }
                 return null;
             }
@@ -1098,5 +1156,268 @@ public class Transformations {
 
     private static String escapeSpecialChar(String sql) {
         return sql.replaceAll("'", "''");
+    }
+
+    /**
+     * Injects a row-level security filter into every real base table in the query by
+     * prepending a filter CTE for each table and renaming the table references to the CTE.
+     *
+     * <p>Example — given filter {@code tenant_id = 'abc'}:
+     * <pre>SELECT * FROM a JOIN b ON a.id = b.id</pre>
+     * becomes:
+     * <pre>WITH ___a AS (SELECT * FROM a WHERE tenant_id = 'abc'),
+     *      ___b AS (SELECT * FROM b WHERE tenant_id = 'abc')
+     * SELECT * FROM ___a a JOIN ___b b ON a.id = b.id</pre>
+     *
+     * <p>Existing user-defined CTEs are not wrapped at the reference site; instead the
+     * filter is injected into their bodies, so they automatically see filtered data.
+     */
+    public static JsonNode injectFilterCtes(JsonNode query, JsonNode filter) {
+        return injectFilterCtes(query, tableName -> filter);
+    }
+
+    /**
+     * Per-table variant of {@link #injectFilterCtes}: each base table gets its own filter
+     * expression looked up by table name from {@code tableFilters}.
+     * Tables not present in the map receive a {@code false} filter (no rows returned),
+     * so the map must cover every table the query touches.
+     */
+    public static JsonNode injectFilterCtes(JsonNode query, Map<String, JsonNode> tableFilters) {
+        return injectFilterCtes(query,
+                tableName -> tableFilters.getOrDefault(tableName, ExpressionFactory.falseExpression()));
+    }
+
+    private static JsonNode injectFilterCtes(JsonNode query, Function<String, JsonNode> filterForTable) {
+        var result = query.deepCopy();
+        var statementNode = (ObjectNode) getFirstStatementNode(result);
+
+        Set<String> userCteNames = collectUserCteNames(statementNode);
+        // Ordered map: cteKey → original BASE_TABLE node (schema/catalog preserved for CTE body)
+        Map<String, ObjectNode> tablesToWrap = new LinkedHashMap<>();
+
+        // Inject into CTE bodies first so user CTEs reference filtered tables
+        JsonNode cteMapNode = statementNode.get("cte_map");
+        if (cteMapNode != null) {
+            JsonNode mapArray = cteMapNode.get("map");
+            if (mapArray != null && mapArray.isArray()) {
+                for (JsonNode entry : mapArray) {
+                    ObjectNode cteBody = (ObjectNode) entry.get("value").get("query").get("node");
+                    renameBaseTablesInStatementNode(cteBody, userCteNames, tablesToWrap);
+                }
+            }
+        }
+        renameBaseTablesInStatementNode(statementNode, userCteNames, tablesToWrap);
+
+        if (!tablesToWrap.isEmpty()) {
+            ArrayNode newMap = JsonNodeFactory.instance.arrayNode();
+            for (Map.Entry<String, ObjectNode> e : tablesToWrap.entrySet()) {
+                String originalTableName = e.getValue().get(FIELD_TABLE_NAME).asText();
+                newMap.add(buildFilterCteEntry(e.getKey(), e.getValue(), filterForTable.apply(originalTableName)));
+            }
+            JsonNode existingMap = statementNode.get("cte_map").get("map");
+            if (existingMap != null && existingMap.isArray()) {
+                for (JsonNode existing : existingMap) {
+                    newMap.add(existing);
+                }
+            }
+            ((ObjectNode) statementNode.get("cte_map")).set("map", newMap);
+        }
+
+        return result;
+    }
+
+    private static Set<String> collectUserCteNames(JsonNode statementNode) {
+        Set<String> names = new HashSet<>();
+        JsonNode cteMap = statementNode.get("cte_map");
+        if (cteMap == null) return names;
+        JsonNode map = cteMap.get("map");
+        if (map == null || !map.isArray()) return names;
+        for (JsonNode entry : map) {
+            JsonNode key = entry.get("key");
+            if (key != null) names.add(key.asText());
+        }
+        return names;
+    }
+
+    /** Dispatches to the correct handler based on whether the node is SELECT or UNION/INTERSECT/EXCEPT. */
+    private static void renameBaseTablesInStatementNode(ObjectNode statementNode, Set<String> userCteNames,
+                                                         Map<String, ObjectNode> tablesToWrap) {
+        String type = statementNode.get(FIELD_TYPE).asText();
+        if (NODE_TYPE_SELECT_NODE.equals(type)) {
+            renameBaseTablesInSelect(statementNode, userCteNames, tablesToWrap);
+        } else if (NODE_TYPE_SET_OPERATION_NODE.equals(type)) {
+            renameBaseTablesInStatementNode((ObjectNode) statementNode.get(FIELD_LEFT), userCteNames, tablesToWrap);
+            renameBaseTablesInStatementNode((ObjectNode) statementNode.get(FIELD_RIGHT), userCteNames, tablesToWrap);
+        }
+    }
+
+    private static void renameBaseTablesInSelect(ObjectNode selectNode, Set<String> userCteNames,
+                                                  Map<String, ObjectNode> tablesToWrap) {
+        JsonNode fromTable = selectNode.get(FIELD_FROM_TABLE);
+        if (fromTable != null && !(fromTable instanceof NullNode)) {
+            renameBaseTablesInFromNode(fromTable, userCteNames, tablesToWrap);
+        }
+        // Walk all expression-bearing fields for subqueries (WHERE IN, EXISTS, scalar, etc.)
+        walkExpressionFieldsInSelect(selectNode, userCteNames, tablesToWrap);
+    }
+
+    /**
+     * Walks the expression-bearing fields of a SELECT node, recursing into any subquery
+     * expressions found (IN, EXISTS, scalar, ANY/ALL).
+     */
+    private static void walkExpressionFieldsInSelect(ObjectNode selectNode, Set<String> userCteNames,
+                                                       Map<String, ObjectNode> tablesToWrap) {
+        walkExpressionsForSubqueries(selectNode.get(FIELD_WHERE_CLAUSE), userCteNames, tablesToWrap);
+        walkExpressionsForSubqueries(selectNode.get("having"), userCteNames, tablesToWrap);
+        walkExpressionsForSubqueries(selectNode.get("qualify"), userCteNames, tablesToWrap);
+        walkExpressionsForSubqueries(selectNode.get("select_list"), userCteNames, tablesToWrap);
+        walkExpressionsForSubqueries(selectNode.get("group_expressions"), userCteNames, tablesToWrap);
+        walkExpressionsForSubqueries(selectNode.get("order_bys"), userCteNames, tablesToWrap);
+    }
+
+    /**
+     * Recursively walks an expression tree and injects the filter into any subquery expressions
+     * (IN/ANY/ALL, EXISTS, scalar subqueries) by renaming their base tables.
+     */
+    private static void walkExpressionsForSubqueries(JsonNode expr, Set<String> userCteNames,
+                                                      Map<String, ObjectNode> tablesToWrap) {
+        if (expr == null || expr instanceof NullNode) return;
+
+        if (expr.isArray()) {
+            for (JsonNode element : expr) {
+                walkExpressionsForSubqueries(element, userCteNames, tablesToWrap);
+            }
+            return;
+        }
+
+        if (!expr.isObject()) return;
+
+        JsonNode classNode = expr.get(FIELD_CLASS);
+        if (classNode != null && SUBQUERY_CLASS.equals(classNode.asText())) {
+            // Expression-level subquery: IN (SELECT ...), EXISTS (...), scalar (SELECT ...)
+            // renameBaseTablesInStatementNode already walks expression fields via renameBaseTablesInSelect
+            JsonNode subqueryContent = expr.get(FIELD_SUBQUERY);
+            if (subqueryContent != null) {
+                ObjectNode innerNode = (ObjectNode) subqueryContent.get(FIELD_NODE);
+                if (innerNode != null) {
+                    renameBaseTablesInStatementNode(innerNode, userCteNames, tablesToWrap);
+                }
+            }
+            // Walk the `child` field (the expression on the left side of IN/ANY/ALL)
+            walkExpressionsForSubqueries(expr.get(FIELD_CHILD), userCteNames, tablesToWrap);
+            return;
+        }
+
+        // Recurse into known expression child fields for all other expression types
+        walkExpressionsForSubqueries(expr.get(FIELD_LEFT), userCteNames, tablesToWrap);
+        walkExpressionsForSubqueries(expr.get(FIELD_RIGHT), userCteNames, tablesToWrap);
+        walkExpressionsForSubqueries(expr.get(FIELD_CHILDREN), userCteNames, tablesToWrap);
+        walkExpressionsForSubqueries(expr.get(FIELD_CHILD), userCteNames, tablesToWrap);
+        walkExpressionsForSubqueries(expr.get(FIELD_FILTER), userCteNames, tablesToWrap);
+        // CASE WHEN THEN ELSE
+        walkExpressionsForSubqueries(expr.get(FIELD_WHEN_EXPR), userCteNames, tablesToWrap);
+        walkExpressionsForSubqueries(expr.get(FIELD_THEN_EXPR), userCteNames, tablesToWrap);
+        walkExpressionsForSubqueries(expr.get(FIELD_ELSE_EXPR), userCteNames, tablesToWrap);
+        walkExpressionsForSubqueries(expr.get(FIELD_CASE_CHECKS), userCteNames, tablesToWrap);
+    }
+
+    private static void renameBaseTablesInFromNode(JsonNode fromNode, Set<String> userCteNames,
+                                                    Map<String, ObjectNode> tablesToWrap) {
+        if (fromNode == null || fromNode instanceof NullNode) return;
+        String type = fromNode.get(FIELD_TYPE).asText();
+        switch (type) {
+            case NODE_TYPE_BASE_TABLE -> {
+                String tableName = fromNode.get(FIELD_TABLE_NAME).asText();
+                if (userCteNames.contains(tableName)) return; // CTE reference — skip
+                String schema = fromNode.has(FIELD_SCHEMA_NAME) ? fromNode.get(FIELD_SCHEMA_NAME).asText() : "";
+                String catalog = fromNode.has(FIELD_CATALOG_NAME) ? fromNode.get(FIELD_CATALOG_NAME).asText() : "";
+                String cteKey = buildCteKey(tableName, schema, catalog);
+                if (!tablesToWrap.containsKey(cteKey)) {
+                    tablesToWrap.put(cteKey, (ObjectNode) fromNode.deepCopy());
+                }
+                ObjectNode mutable = (ObjectNode) fromNode;
+                String existingAlias = mutable.has(FIELD_ALIAS) ? mutable.get(FIELD_ALIAS).asText() : "";
+                if (existingAlias.isEmpty()) {
+                    mutable.put(FIELD_ALIAS, tableName);
+                }
+                mutable.put(FIELD_TABLE_NAME, cteKey);
+                mutable.put(FIELD_SCHEMA_NAME, "");
+                mutable.put(FIELD_CATALOG_NAME, "");
+            }
+            case NODE_TYPE_JOIN -> {
+                renameBaseTablesInFromNode(fromNode.get(FIELD_LEFT), userCteNames, tablesToWrap);
+                renameBaseTablesInFromNode(fromNode.get(FIELD_RIGHT), userCteNames, tablesToWrap);
+                // Walk the join condition for subqueries (rare but possible)
+                walkExpressionsForSubqueries(fromNode.get("condition"), userCteNames, tablesToWrap);
+            }
+            case NODE_TYPE_SUBQUERY -> {
+                ObjectNode innerSelect = (ObjectNode) fromNode.get(FIELD_SUBQUERY).get(FIELD_NODE);
+                renameBaseTablesInSelect(innerSelect, userCteNames, tablesToWrap);
+            }
+            case NODE_TYPE_SET_OPERATION_NODE -> {
+                renameBaseTablesInFromNode(fromNode.get(FIELD_LEFT), userCteNames, tablesToWrap);
+                renameBaseTablesInFromNode(fromNode.get(FIELD_RIGHT), userCteNames, tablesToWrap);
+            }
+        }
+    }
+
+    private static String buildCteKey(String tableName, String schema, String catalog) {
+        var key = new StringBuilder("___");
+        if (catalog != null && !catalog.isEmpty()) key.append(catalog).append("_");
+        if (schema != null && !schema.isEmpty()) key.append(schema).append("_");
+        key.append(tableName);
+        return key.toString();
+    }
+
+    private static ObjectNode buildFilterCteEntry(String cteKey, ObjectNode originalTableNode, JsonNode filter) {
+        JsonNodeFactory f = JsonNodeFactory.instance;
+
+        // SELECT * FROM <original_table> WHERE <filter>
+        ObjectNode innerSelect = f.objectNode();
+        innerSelect.put(FIELD_TYPE, NODE_TYPE_SELECT_NODE);
+        innerSelect.putArray(FIELD_MODIFIERS);
+        ObjectNode innerCteMap = f.objectNode();
+        innerCteMap.putArray("map");
+        innerSelect.set("cte_map", innerCteMap);
+
+        ObjectNode star = f.objectNode();
+        star.put(FIELD_CLASS, "STAR");
+        star.put(FIELD_TYPE, "STAR");
+        star.put(FIELD_ALIAS, "");
+        star.put(FIELD_QUERY_LOCATION, 0);
+        star.put("relation_name", "");
+        star.putArray("exclude_list");
+        star.putArray("replace_list");
+        star.put("columns", false);
+        star.putNull("expr");
+        star.putArray("qualified_exclude_list");
+        star.putArray("rename_list");
+        innerSelect.putArray("select_list").add(star);
+
+        ObjectNode fromTable = originalTableNode.deepCopy();
+        fromTable.put(FIELD_ALIAS, "");
+        innerSelect.set(FIELD_FROM_TABLE, fromTable);
+        innerSelect.set(FIELD_WHERE_CLAUSE, filter);
+        innerSelect.putArray("group_expressions");
+        innerSelect.putArray("group_sets");
+        innerSelect.put("aggregate_handling", "STANDARD_HANDLING");
+        innerSelect.putNull("having");
+        innerSelect.putNull("sample");
+        innerSelect.putNull("qualify");
+
+        ObjectNode queryWrapper = f.objectNode();
+        queryWrapper.set(FIELD_NODE, innerSelect);
+        queryWrapper.putArray("named_param_map");
+
+        ObjectNode cteValue = f.objectNode();
+        cteValue.putArray("aliases");
+        cteValue.set("query", queryWrapper);
+        cteValue.put("materialized", "CTE_MATERIALIZE_DEFAULT");
+        cteValue.putArray("key_targets");
+
+        ObjectNode entry = f.objectNode();
+        entry.put("key", cteKey);
+        entry.set("value", cteValue);
+        return entry;
     }
 }

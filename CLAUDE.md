@@ -34,9 +34,22 @@ DazzleDuck SQL Server is a high-performance remote DuckDB server that supports b
 # Run tests for specific module
 ./mvnw test -pl dazzleduck-sql-http
 
-# Build Docker image
+# Build Docker image (single arch — quick local dev)
+# Apple Silicon (arm64):
+./mvnw package -DskipTests jib:dockerBuild -pl dazzleduck-sql-runtime -Djib.architecture=arm64
+# x86-64 (amd64) — requires amd64 base image:
 ./mvnw package -DskipTests jib:dockerBuild -pl dazzleduck-sql-runtime
+
+# Build both arm64 + amd64 images and create a local multi-arch manifest
+# (amd64 is skipped by default until dazzleduck/base-jre has an amd64 variant;
+#  enable with -Dskip.docker.amd64=false once the base image supports it)
+./mvnw verify -DskipTests -pl dazzleduck-sql-runtime --also-make
 ```
+
+Images produced:
+- `dazzleduck/dazzleduck:{version}-arm64` / `latest-arm64`
+- `dazzleduck/dazzleduck:{version}-amd64` / `latest-amd64`  (when enabled)
+- `dazzleduck/dazzleduck:{version}` / `latest` — local manifest list (both arches)
 
 ### Maven JVM Flags
 Required for Arrow memory management:
@@ -151,29 +164,70 @@ dazzleduck-sql-server/
 **Authorization:**
 - `SqlAuthorizer.java` - Main authorization interface
 - `JwtClaimBasedAuthorizer.java` - JWT claim-based row-level security
-- `AccessMode.java` - COMPLETE vs RESTRICTED vs READ_ONLY modes
-- `SelectOnlyAuthorizer.java` - Read-only authorizer for SELECT-only access
+- `AccessMode.java` - COMPLETE, RESTRICTED, READ_ONLY, RESTRICT_READ_ONLY modes
+- `SelectOnlyAuthorizer.java` - SELECT-only authorizer (READ_ONLY mode)
+- `RestrictedDatasourceOnlyAuthorizer.java` - JWT claim-based authorizer (RESTRICTED mode)
+- `RestrictedReadOnlyAuthorizer.java` - SELECT-only + mandatory per-table CTE filter (RESTRICT_READ_ONLY mode)
+- `TableAccessEntry.java` - Parsed entry from the `access` JWT claim
 
 **Access Modes:**
-Three access modes control query permissions and external access:
+Four access modes control query permissions and external access:
 
 | Mode | Description | Authorizer | External Access |
 |-------|-------------|-------------|----------------|
 | **COMPLETE** | Full access to all SQL operations | `NOOP_AUTHORIZER` (no restrictions) | Enabled by default |
-| **READ_ONLY** | Only SELECT queries allowed | `SELECT_ONLY_AUTHORIZER` (blocks INSERT/UPDATE/DELETE/CREATE/DROP/ALTER/TRUNCATE) | Controlled by startup script (`enable_external_access`) |
-| **RESTRICTED** | Only SELECT on one table specified in JWT claims | `JWT_AUTHORIZER` (requires database/schema/table in JWT claims) | Controlled by startup script (`enable_external_access`) |
+| **READ_ONLY** | Only SELECT queries allowed | `SELECT_ONLY_AUTHORIZER` | Controlled by startup script |
+| **RESTRICTED** | SELECT on one datasource; table/path/function scoped via JWT | `RESTRICTED_DATASOURCE_AUTHORIZER` | Controlled by startup script |
+| **RESTRICT_READ_ONLY** | SELECT on any table; mandatory per-table filter injected via CTEs | `RESTRICT_READ_ONLY_AUTHORIZER` | Disabled by default |
+
+**JWT Claims for RESTRICTED mode (`RestrictedDatasourceOnlyAuthorizer`):**
+
+Preferred — `access` claim (takes precedence, exactly one entry required):
+```
+access = [["table",    "orders",       "*", "tenant_id='abc'"]]
+access = [["path",     "s3://bucket/", "*", "true"]]
+access = [["function", "read_parquet", "*", "tenant_id='abc'"]]
+```
+Format: `[[type, name, projection, filter]]` — all four elements required.
+- `type`: `"table"` (BASE_TABLE), `"path"` (TABLE_FUNCTION path prefix), or `"function"` (TABLE_FUNCTION name)
+- `name`: table name, path prefix, or function name
+- `projection`: must be `"*"` (column restriction reserved for future implementation)
+- `filter`: SQL WHERE expression; use `"true"` for no row restriction
+
+Legacy — separate claims (backward compatible):
+```
+table  = "orders"           # allowed table name (BASE_TABLE)
+path   = "s3://bucket/"     # allowed path prefix (TABLE_FUNCTION)
+filter = "tenant_id='abc'"  # optional row filter
+```
+
+**JWT Claims for RESTRICT_READ_ONLY mode (`RestrictedReadOnlyAuthorizer`):**
+
+`access` claim (preferred, supports multiple tables):
+```
+access = [["table","orders","*","owner_id='alice'"],["table","items","*","region='us'"]]
+```
+Only `"table"` type is supported (external access is disabled in this mode).
+
+Legacy — separate claims (exactly one table required):
+```
+table  = "orders"
+filter = "tenant_id='abc'"  # mandatory; query is rejected if absent
+```
+
+The filter is injected as a CTE for every base table in the query (including JOIN arms, WHERE subqueries, EXISTS, scalar subqueries), so no table reference can bypass it.
 
 **External Access Control:**
 External access refers to DuckDB's ability to access external tables and functions (e.g., `read_parquet`, `read_json`, `httpfs`):
 
 - **COMPLETE mode**: All external tables and functions are accessible by default
-- **READ_ONLY/RESTRICTED modes**: External access must be explicitly enabled in startup script:
+- **READ_ONLY/RESTRICTED/RESTRICT_READ_ONLY modes**: External access must be explicitly enabled in startup script:
   ```sql
   SET enable_external_access = true;  -- Enable external access
-  SET enable_external_access = false; -- Disable external access (default for read-only modes)
+  SET enable_external_access = false; -- Disable external access (default for restricted modes)
   ```
 
-This security feature prevents read-only users from accessing arbitrary external data sources while still allowing them to query authorized tables.
+This security feature prevents restricted users from accessing arbitrary external data sources while still allowing them to query authorized tables.
 
 ### dazzleduck-sql-common
 **Shared utilities**
@@ -544,6 +598,7 @@ Headers.HEADER_TABLE              // "table"
 Headers.HEADER_PATH               // "path"
 Headers.HEADER_FUNCTION           // "function"
 Headers.HEADER_FILTER             // "filter"
+Headers.HEADER_ACCESS       // "access" — per-table [[type,name,projection,filter]] JWT claim
 Headers.HEADER_SPLIT_SIZE         // "split_size"
 Headers.HEADER_DATA_PARTITION     // "partition"
 Headers.HEADER_DATA_FORMAT        // "format"

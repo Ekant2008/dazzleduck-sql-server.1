@@ -361,8 +361,10 @@ public class DuckDBFlightSqlProducer implements FlightSqlHttpProducer, SqlProduc
         this.maxQueryTimeout = maxQueryTimeout;
         this.recorder = recorder;
         if (AccessMode.RESTRICTED == accessMode) {
-            this.sqlAuthorizer = SqlAuthorizer.JWT_AUTHORIZER;
-        } else if(AccessMode.COMPLETE == accessMode ) {
+            this.sqlAuthorizer = SqlAuthorizer.RESTRICTED_DATASOURCE_AUTHORIZER;
+        } else if (AccessMode.RESTRICT_READ_ONLY == accessMode) {
+            this.sqlAuthorizer = SqlAuthorizer.RESTRICT_READ_ONLY_AUTHORIZER;
+        } else if (AccessMode.COMPLETE == accessMode) {
             this.sqlAuthorizer = SqlAuthorizer.NOOP_AUTHORIZER;
         } else {
             this.sqlAuthorizer = SqlAuthorizer.SELECT_ONLY_AUTHORIZER;
@@ -467,7 +469,13 @@ public class DuckDBFlightSqlProducer implements FlightSqlHttpProducer, SqlProduc
             return;
         }
 
-        String authorizedSql = request.getQuery();
+        final String authorizedSql;
+        try {
+            authorizedSql = transformPreparedStatementQuery(context, connection, request.getQuery());
+        } catch (Throwable t) {
+            ErrorHandling.handleThrowable(listener, t);
+            return;
+        }
         StatementHandle handle = newStatementHandle(authorizedSql);
         var cacheKey = new CacheKey(context.peerIdentity(), handle.queryId());
 
@@ -701,6 +709,17 @@ public class DuckDBFlightSqlProducer implements FlightSqlHttpProducer, SqlProduc
                     .withDescription("Limit header '" + Headers.HEADER_DATA_LIMIT + "' is not supported by this producer")
                     .toRuntimeException();
         }
+        return query;
+    }
+
+    /**
+     * Extension point for subclasses to authorize and rewrite a query at prepared-statement
+     * creation time. The returned SQL is stored in the signed handle; execution skips
+     * {@link #transformQuery} when a checksum is present, so the rewrite happens exactly once.
+     * Default implementation returns the query unchanged.
+     */
+    protected String transformPreparedStatementQuery(CallContext context, Connection connection, String query)
+            throws UnauthorizedException, JsonProcessingException, SQLException {
         return query;
     }
 
@@ -1445,6 +1464,10 @@ public class DuckDBFlightSqlProducer implements FlightSqlHttpProducer, SqlProduc
 
     protected StatementHandle newStatementHandle(String query) {
         return newStatementHandle(query, -1);
+    }
+
+    protected static <T> T throwNotSupported(String operation) {
+        throw new UnsupportedOperationException("Operation not supported: " + operation);
     }
 
 }

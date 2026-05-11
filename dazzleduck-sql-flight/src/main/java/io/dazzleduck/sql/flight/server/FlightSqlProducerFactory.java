@@ -460,6 +460,24 @@ public final class FlightSqlProducerFactory {
                     ingestionConfig,
                     dataProcessorLocations
                 );
+            } else if (accessMode == AccessMode.RESTRICT_READ_ONLY) {
+                return new RestrictedReadOnlyFlightSqlProducer(
+                        location,
+                        producerId,
+                        secretKey,
+                        finalAllocator,
+                        warehousePath,
+                        accessMode,
+                        tempWriteDir,
+                        ingestionHandler,
+                        finalExecutorService,
+                        queryTimeout,
+                        maxQueryTimeout,
+                        clock,
+                        finalRecorder,
+                        ingestionConfig,
+                        dataProcessorLocations
+                );
             } else if (accessMode == AccessMode.READ_ONLY ) {
                 return new SelectOnlyFlightSqlProducer(
                         location,

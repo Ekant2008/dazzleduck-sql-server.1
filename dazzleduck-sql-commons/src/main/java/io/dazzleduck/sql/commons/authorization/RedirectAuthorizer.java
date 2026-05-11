@@ -46,7 +46,13 @@ public class RedirectAuthorizer {
         }
     }
 
-    private final Map<String, ResolveResponseCacheEntry> resolveResponseByUser = new ConcurrentHashMap<>();
+    // Keyed on user + redirectUrl + bearerToken so that revoking a token or switching
+    // to a different redirect URL always bypasses the cache and triggers a fresh resolve call.
+    private final Map<String, ResolveResponseCacheEntry> resolveResponseCache = new ConcurrentHashMap<>();
+
+    private static String cacheKey(String user, String redirectUrl, String bearerToken) {
+        return user + ":" + redirectUrl + ":" + bearerToken.hashCode();
+    }
 
     /**
      * Authorizes a query by calling the remote resolve endpoint and matching each
@@ -70,7 +76,8 @@ public class RedirectAuthorizer {
         ResolveResponse response = callResolveEndpoint(user, bearerToken, redirectUrl);
 
         var firstStatement = Transformations.getFirstStatementNode(query);
-        var catalogSchemaTables = Transformations.getAllTablesOrPathsFromSelect(firstStatement, database, schema);
+        // Use comprehensive collector so subquery tables are also access-controlled.
+        var catalogSchemaTables = Transformations.collectAllTableReferences(firstStatement, database, schema);
 
         if (catalogSchemaTables.isEmpty()) {
             throw new UnauthorizedException("No table or path found in query");
@@ -151,7 +158,8 @@ public class RedirectAuthorizer {
     }
 
     private ResolveResponse callResolveEndpoint(String user, String bearerToken, String resolveUrl) throws UnauthorizedException {
-        ResolveResponseCacheEntry entry = resolveResponseByUser.get(user);
+        String key = cacheKey(user, resolveUrl, bearerToken);
+        ResolveResponseCacheEntry entry = resolveResponseCache.get(key);
         if (entry != null && !entry.isExpired()) {
             logger.debug("RedirectAuthorizer: using cached resolve response for user={}, tables={}", user,
                     entry.resolveResponse().tables() != null ? entry.resolveResponse().tables().stream().map(r -> r.catalog() + "." + r.schema() + "." + r.tableOrPath()).toList() : "null");
@@ -171,7 +179,7 @@ public class RedirectAuthorizer {
                         "Resolve endpoint returned status " + response.statusCode());
             }
             ResolveResponse resolved = MAPPER.readValue(response.body(), ResolveResponse.class);
-            resolveResponseByUser.put(user, new ResolveResponseCacheEntry(resolved, Instant.now()));
+            resolveResponseCache.put(key, new ResolveResponseCacheEntry(resolved, Instant.now()));
             return resolved;
         } catch (UnauthorizedException e) {
             throw e;

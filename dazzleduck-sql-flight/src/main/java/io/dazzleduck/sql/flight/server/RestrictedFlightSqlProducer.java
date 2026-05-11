@@ -46,8 +46,12 @@ public class RestrictedFlightSqlProducer extends DuckDBFlightSqlProducer {
         this.queryOptimizer = queryOptimizer;
     }
 
-    public static <T> T throwNotSupported(String operation) {
-        throw new UnsupportedOperationException("Operation not supported :" + operation);
+    @Override
+    public void createPreparedStatement(
+            FlightSql.ActionCreatePreparedStatementRequest request,
+            CallContext context,
+            StreamListener<Result> listener) {
+        throwNotSupported("Prepared statements are not supported in restricted mode");
     }
 
     @Override
