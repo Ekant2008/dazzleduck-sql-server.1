@@ -1,5 +1,6 @@
 package io.dazzleduck.sql.otel.collector.config;
 
+import com.typesafe.config.Config;
 import io.dazzleduck.sql.commons.ingestion.IngestionHandler;
 import io.dazzleduck.sql.commons.ingestion.NOOPIngestionTaskFactoryProvider;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -33,6 +34,10 @@ public class CollectorProperties {
     private Map<String, String> users = new HashMap<>();
     private Duration jwtExpiration = Duration.ofHours(1);
     private MeterRegistry meterRegistry = new SimpleMeterRegistry();
+
+    // Provider configuration for deferred loading (after startup script executes)
+    private Config providerConfig;
+    private boolean useDeferredLoading = false;
 
     public int getGrpcPort() {
         return grpcPort;
@@ -152,5 +157,36 @@ public class CollectorProperties {
 
     public void setMeterRegistry(MeterRegistry meterRegistry) {
         this.meterRegistry = meterRegistry;
+    }
+
+    // Methods for deferred task factory loading
+    public void setProviderConfig(Config config) {
+        this.providerConfig = config;
+        this.useDeferredLoading = (config != null);
+    }
+
+    public Config getProviderConfig() {
+        return providerConfig;
+    }
+
+    public boolean shouldUseDeferredLoading() {
+        return useDeferredLoading;
+    }
+
+    // Load task factories from provider config (called after startup script executes)
+    public void loadTaskFactoriesFromConfig() {
+        if (!useDeferredLoading || providerConfig == null) {
+            return;
+        }
+
+        try {
+            CollectorConfig configLoader = new CollectorConfig(providerConfig);
+            this.logIngestionHandler = configLoader.getLogIngestionTaskFactory();
+            this.traceIngestionHandler = configLoader.getTraceIngestionTaskFactory();
+            this.metricIngestionHandler = configLoader.getMetricIngestionTaskFactory();
+        } catch (Exception e) {
+            // If loading fails, keep NOOP handlers
+            System.err.println("Failed to load task factories from config: " + e.getMessage());
+        }
     }
 }

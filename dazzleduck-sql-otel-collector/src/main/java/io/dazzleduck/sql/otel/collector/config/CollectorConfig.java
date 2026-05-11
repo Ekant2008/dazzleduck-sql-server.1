@@ -231,9 +231,14 @@ public class CollectorConfig {
         props.setLogIngestionConfig(getLogIngestionConfig());
         props.setTraceIngestionConfig(getTraceIngestionConfig());
         props.setMetricIngestionConfig(getMetricIngestionConfig());
-        props.setLogIngestionTaskFactory(getLogIngestionTaskFactory());
-        props.setTraceIngestionTaskFactory(getTraceIngestionTaskFactory());
-        props.setMetricIngestionTaskFactory(getMetricIngestionTaskFactory());
+
+        // Store provider config for deferred loading (after startup script executes)
+        // This fixes the initialization order issue where DuckLake metadata
+        // doesn't exist when task factories are first loaded
+        props.setProviderConfig(this.config);
+
+        // Don't load task factories yet - they will be loaded after startup script
+        // The default NOOP handlers will be used temporarily
         return props;
     }
 

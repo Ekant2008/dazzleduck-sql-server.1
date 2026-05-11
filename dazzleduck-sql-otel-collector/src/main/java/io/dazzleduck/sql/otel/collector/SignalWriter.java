@@ -54,7 +54,11 @@ public class SignalWriter implements Closeable {
                         IngestionHandler ingestionHandler) throws IOException {
         this.queueId = queueId;
         this.outputPath = config.outputPath();
-        Files.createDirectories(Path.of(outputPath));
+        // Output can be local filesystem or remote (e.g. s3://...). DuckDB's COPY can write to
+        // remote paths when extensions/settings are configured, but java.nio.Path can't parse them.
+        if (isLocalPath(outputPath)) {
+            Files.createDirectories(Path.of(outputPath));
+        }
         this.partitions = config.partitionBy().toArray(new String[0]);
 
         String queueTransformation = toQueueTransformation(config.transformation());
@@ -139,5 +143,10 @@ public class SignalWriter implements Closeable {
     private static String toQueueTransformation(String transformation) {
         if (transformation == null || transformation.isBlank()) return null;
         return "SELECT *, " + transformation + " FROM __this";
+    }
+
+    private static boolean isLocalPath(String outputPath) {
+        if (outputPath == null) return true;
+        return !outputPath.contains("://");
     }
 }

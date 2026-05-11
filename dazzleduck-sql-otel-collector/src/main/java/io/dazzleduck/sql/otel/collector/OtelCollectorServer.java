@@ -39,6 +39,14 @@ public class OtelCollectorServer implements Closeable {
             ConnectionPool.executeOnSingleton(startupScript);
         }
 
+        // Load task factories from provider config after startup script executes
+        // This fixes the initialization order issue where DuckLake metadata
+        // doesn't exist when task factories are first loaded
+        if (props.shouldUseDeferredLoading()) {
+            log.info("Loading task factories after startup script execution");
+            props.loadTaskFactoriesFromConfig();
+        }
+
         logWriter     = new SignalWriter("logs",    props.getLogIngestionConfig(),    props.getLogIngestionTaskFactory());
         traceWriter   = new SignalWriter("traces",  props.getTraceIngestionConfig(),  props.getTraceIngestionTaskFactory());
         metricsWriter = new SignalWriter("metrics", props.getMetricIngestionConfig(), props.getMetricIngestionTaskFactory());
