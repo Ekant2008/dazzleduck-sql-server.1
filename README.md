@@ -97,6 +97,8 @@ To push to Docker Hub after building both platform images:
 ```bash
 docker push dazzleduck/dazzleduck:{version}-arm64
 docker push dazzleduck/dazzleduck:{version}-amd64
+# Create and push the multi-arch manifest list
+./dazzleduck-sql-runtime/docker/manifest.sh {version}
 docker manifest push dazzleduck/dazzleduck:{version}
 docker manifest push dazzleduck/dazzleduck:latest
 ```

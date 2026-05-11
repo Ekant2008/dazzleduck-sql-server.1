@@ -16,6 +16,7 @@
         <exec.mainClass>io.dazzleduck.sql.runtime.Main</exec.mainClass>
         <!-- Override with -Djib.architecture=arm64 on Apple Silicon -->
         <jib.architecture>amd64</jib.architecture>
+        <skip.docker.arm64>false</skip.docker.arm64>
         <skip.docker.amd64>false</skip.docker.amd64>
     </properties>
     <dependencies>
@@ -157,9 +158,6 @@
                             <option>/app/entrypoint.sh "$@"</option>
                             <option>--</option>
                         </entrypoint>
-                        <jvmFlags>
-                            <jvmFlag>--add-opens=java.base/java.nio=ALL-UNNAMED</jvmFlag>
-                        </jvmFlags>
                         <ports>
                             <port>8081</port>
                             <port>59307</port>
@@ -238,12 +236,12 @@
                     </extraDirectories>
                 </configuration>
                 <executions>
-                    <!-- arm64 image — bound to package phase -->
                     <execution>
                         <id>docker-arm64</id>
                         <phase>package</phase>
                         <goals><goal>dockerBuild</goal></goals>
                         <configuration>
+                            <skip>${skip.docker.arm64}</skip>
                             <from>
                                 <image>dazzleduck/base-jre:25-noble-duckdb-${duckdb.version}</image>
                                 <platforms>
@@ -256,9 +254,7 @@
                             </to>
                         </configuration>
                     </execution>
-                    <!-- amd64 image — bound to package phase.
-                         Requires base image to have an amd64 variant.
-                         Enable with: mvn package -DskipTests -Dskip.docker.amd64=false -->
+                    <!-- amd64 image — skip with -Dskip.docker.amd64=true -->
                     <execution>
                         <id>docker-amd64</id>
                         <phase>package</phase>
@@ -275,24 +271,6 @@
                                 <image>dazzleduck/dazzleduck:${project.version}-amd64</image>
                                 <tags><tag>latest-amd64</tag></tags>
                             </to>
-                        </configuration>
-                    </execution>
-                </executions>
-            </plugin>
-            <!-- Create multi-arch manifest in verify phase (after package builds both images) -->
-            <plugin>
-                <groupId>org.codehaus.mojo</groupId>
-                <artifactId>exec-maven-plugin</artifactId>
-                <executions>
-                    <execution>
-                        <id>docker-manifest-create</id>
-                        <phase>verify</phase>
-                        <goals><goal>exec</goal></goals>
-                        <configuration combine.self="override">
-                            <executable>${project.basedir}/docker/manifest.sh</executable>
-                            <arguments>
-                                <argument>${project.version}</argument>
-                            </arguments>
                         </configuration>
                     </execution>
                 </executions>
