@@ -16,8 +16,7 @@
         <exec.mainClass>io.dazzleduck.sql.runtime.Main</exec.mainClass>
         <!-- Override with -Djib.architecture=arm64 on Apple Silicon -->
         <jib.architecture>amd64</jib.architecture>
-        <!-- Set to false once dazzleduck/base-jre has an amd64 variant -->
-        <skip.docker.amd64>true</skip.docker.amd64>
+        <skip.docker.amd64>false</skip.docker.amd64>
     </properties>
     <dependencies>
         <dependency>
@@ -137,7 +136,7 @@
                      Lifecycle-bound multi-arch builds use the <executions> below. -->
                 <configuration>
                     <from>
-                        <image>dazzleduck/base-jre:21-noble-duckdb-${duckdb.version}</image>
+                        <image>dazzleduck/base-jre:25-noble-duckdb-${duckdb.version}</image>
                         <platforms>
                             <platform>
                                 <os>linux</os>
@@ -246,7 +245,7 @@
                         <goals><goal>dockerBuild</goal></goals>
                         <configuration>
                             <from>
-                                <image>dazzleduck/base-jre:21-noble-duckdb-${duckdb.version}</image>
+                                <image>dazzleduck/base-jre:25-noble-duckdb-${duckdb.version}</image>
                                 <platforms>
                                     <platform><os>linux</os><architecture>arm64</architecture></platform>
                                 </platforms>
@@ -267,7 +266,7 @@
                         <configuration>
                             <skip>${skip.docker.amd64}</skip>
                             <from>
-                                <image>dazzleduck/base-jre:21-noble-duckdb-${duckdb.version}</image>
+                                <image>dazzleduck/base-jre:25-noble-duckdb-${duckdb.version}</image>
                                 <platforms>
                                     <platform><os>linux</os><architecture>amd64</architecture></platform>
                                 </platforms>
