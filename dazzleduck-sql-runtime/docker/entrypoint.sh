@@ -25,6 +25,6 @@ case "$1" in
   *)
     # Default: run the runtime Main with all arguments
     echo "Starting DazzleDuck Runtime..."
-    exec java $JVM_OPTS -cp $CLASSPATH io.dazzleduck.sql.runtime.Main "$@"
+    exec java $JVM_OPTS -Dslf4j.provider=ch.qos.logback.classic.spi.LogbackServiceProvider -cp $CLASSPATH io.dazzleduck.sql.runtime.Main "$@"
     ;;
 esac

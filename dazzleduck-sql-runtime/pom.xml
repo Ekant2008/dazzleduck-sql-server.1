@@ -37,6 +37,14 @@
             <artifactId>hadoop-client-runtime</artifactId>
             <version>${hadoop.version}</version>
             <scope>provided</scope>
+            <exclusions>
+                <!-- hadoop-client-runtime pulls in slf4j-api:1.7.36 (SLF4J 1.x); exclude to
+                     prevent it from polluting the Docker classpath via transitive resolution -->
+                <exclusion>
+                    <groupId>org.slf4j</groupId>
+                    <artifactId>slf4j-api</artifactId>
+                </exclusion>
+            </exclusions>
         </dependency>
         <dependency>
             <groupId>org.apache.hadoop</groupId>
@@ -79,10 +87,13 @@
             <version>${calcite.version}</version>
             <scope>test</scope>
         </dependency>
+        <!-- test-only: slf4j-simple provides console logging for local/test runs.
+             Docker image uses Logback from /app/extra (dazzleduck-sql-logback module). -->
         <dependency>
             <groupId>org.slf4j</groupId>
             <artifactId>slf4j-simple</artifactId>
             <version>${slf4j.version}</version>
+            <scope>test</scope>
         </dependency>
     </dependencies>
 
