@@ -20,7 +20,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl zip && \
     fi && \
     mkdir -p /app/libs && \
     mv /tmp/duckdb_jdbc.jar /app/libs/duckdb_jdbc-${DUCKDB_VERSION}.jar && \
-    apt-get remove -y curl zip && apt-get autoremove -y && rm -rf /var/lib/apt/lists/*
+    apt-get remove -y zip && apt-get autoremove -y && rm -rf /var/lib/apt/lists/*
 
 COPY example/data /data
 COPY example/startup /startup
