@@ -41,22 +41,25 @@ The project includes JDK 11 compatible client libraries:
 
 ### 1. Build the base image (one-time, or when Java/DuckDB version changes)
 
+The base image bundles the JRE and the native DuckDB JDBC driver. It must be built for each
+target platform and pushed to Docker Hub before the application image can be assembled.
+
 ```bash
 DUCKDB_VERSION=$(./mvnw help:evaluate -Dexpression=duckdb.version -q -DforceStdout)
 
-# Local Docker daemon (development)
+# Single platform — local daemon (development)
 docker build \
-  --platform linux/amd64 \
+  --platform linux/arm64 \
   --build-arg DUCKDB_VERSION=$DUCKDB_VERSION \
-  -t dazzleduck/base-jre:21-alpine \
+  -t dazzleduck/base-jre:21-noble-duckdb-${DUCKDB_VERSION} \
   -f dazzleduck-sql-runtime/docker/Dockerfile.base \
   dazzleduck-sql-runtime/docker/
 
-# Multi-platform push to Docker Hub (CI/CD)
+# Multi-platform manifest push to Docker Hub (CI/CD)
 docker buildx build \
   --platform linux/amd64,linux/arm64 \
   --build-arg DUCKDB_VERSION=$DUCKDB_VERSION \
-  -t dazzleduck/base-jre:21-alpine \
+  -t dazzleduck/base-jre:21-noble-duckdb-${DUCKDB_VERSION} \
   -f dazzleduck-sql-runtime/docker/Dockerfile.base \
   dazzleduck-sql-runtime/docker/ \
   --push
@@ -64,12 +67,38 @@ docker buildx build \
 
 ### 2. Build the application image
 
-```bash
-# Build all modules and push to Docker Hub (CI/CD)
-./mvnw clean package jib:build -pl dazzleduck-sql-runtime -am -DskipTests
+The application image is assembled by Jib (no Dockerfile required). Two platform-specific
+images are built during `mvn verify` and combined into a local multi-arch manifest list.
 
-# Build to local Docker daemon only (development)
-./mvnw clean package jib:dockerBuild -pl dazzleduck-sql-runtime -am -DskipTests
+```bash
+# Quick single-arch build — Apple Silicon (arm64)
+./mvnw package -DskipTests jib:dockerBuild -pl dazzleduck-sql-runtime -Djib.architecture=arm64
+
+# Quick single-arch build — x86-64 (amd64, requires amd64 base image)
+./mvnw package -DskipTests jib:dockerBuild -pl dazzleduck-sql-runtime
+
+# Both arm64 + amd64 + local manifest list (verify phase)
+# amd64 is skipped until the base image has an amd64 variant;
+# enable with -Dskip.docker.amd64=false once the base image supports it
+./mvnw verify -DskipTests -pl dazzleduck-sql-runtime --also-make
+```
+
+Images produced:
+
+| Tag | Description |
+|---|---|
+| `dazzleduck/dazzleduck:{version}-arm64` | arm64 platform image |
+| `dazzleduck/dazzleduck:{version}-amd64` | amd64 platform image (when enabled) |
+| `dazzleduck/dazzleduck:{version}` | local multi-arch manifest list |
+| `dazzleduck/dazzleduck:latest` | local multi-arch manifest list |
+
+To push to Docker Hub after building both platform images:
+
+```bash
+docker push dazzleduck/dazzleduck:{version}-arm64
+docker push dazzleduck/dazzleduck:{version}-amd64
+docker manifest push dazzleduck/dazzleduck:{version}
+docker manifest push dazzleduck/dazzleduck:latest
 ```
 
 ### 3. Run the container
@@ -80,21 +109,7 @@ docker run -ti -p 59307:59307 -p 8081:8081 dazzleduck/dazzleduck:latest \
   --conf users.0.password="your password"
 ```
 
-This will print the following on the console:
-```
-============================================================
-DazzleDuck SQL Server 0.0.36
-============================================================
-Warehouse Path: /data
-HTTP Server started successfully
-Listening on: http://0.0.0.0:8081
-Health check: http://0.0.0.0:8081/health
-UI dashboard: http://0.0.0.0:8081/v1/ui
-Flight Server is up: Listening on URI: grpc+tcp://0.0.0.0:59307
-```
-
 The server runs both Arrow Flight SQL (gRPC) on port `59307` and HTTP REST API on port `8081`.
-See `dazzleduck-sql-runtime/docker/README.md` for full Docker build documentation.
 
 ## Getting started from the command line (development)
 

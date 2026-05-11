@@ -16,6 +16,8 @@
         <exec.mainClass>io.dazzleduck.sql.runtime.Main</exec.mainClass>
         <!-- Override with -Djib.architecture=arm64 on Apple Silicon -->
         <jib.architecture>amd64</jib.architecture>
+        <!-- Set to false once dazzleduck/base-jre has an amd64 variant -->
+        <skip.docker.amd64>true</skip.docker.amd64>
     </properties>
     <dependencies>
         <dependency>
@@ -131,6 +133,8 @@
                 <groupId>com.google.cloud.tools</groupId>
                 <artifactId>jib-maven-plugin</artifactId>
                 <version>3.5.1</version>
+                <!-- Shared config: used by direct `mvn jib:dockerBuild` invocations.
+                     Lifecycle-bound multi-arch builds use the <executions> below. -->
                 <configuration>
                     <from>
                         <image>dazzleduck/base-jre:21-noble-duckdb-${duckdb.version}</image>
@@ -142,11 +146,12 @@
                         </platforms>
                     </from>
                     <to>
-                        <image>dazzleduck/dazzleduck:latest</image>
+                        <image>dazzleduck/dazzleduck:${project.version}-${jib.architecture}</image>
+                        <tags>
+                            <tag>latest-${jib.architecture}</tag>
+                        </tags>
                     </to>
-
                     <container>
-                        <!-- Use entrypoint script instead of mainClass -->
                         <entrypoint>
                             <shell>sh</shell>
                             <option>-c</option>
@@ -161,16 +166,12 @@
                             <port>59307</port>
                         </ports>
                     </container>
-
                     <extraDirectories>
                         <paths>
-                            <!-- Plugin JARs loaded via /app/extra (these modules depend on runtime, so can't be Maven deps) -->
                             <path>
                                 <from>${project.basedir}/../dazzleduck-sql-logback/target</from>
                                 <into>/app/extra</into>
-                                <includes>
-                                    <include>dazzleduck-sql-logback-*.jar</include>
-                                </includes>
+                                <includes><include>dazzleduck-sql-logback-*.jar</include></includes>
                                 <excludes>
                                     <exclude>*-sources.jar</exclude>
                                     <exclude>*-javadoc.jar</exclude>
@@ -180,9 +181,7 @@
                             <path>
                                 <from>${project.basedir}/../dazzleduck-sql-micrometer/target</from>
                                 <into>/app/extra</into>
-                                <includes>
-                                    <include>dazzleduck-sql-micrometer-*.jar</include>
-                                </includes>
+                                <includes><include>dazzleduck-sql-micrometer-*.jar</include></includes>
                                 <excludes>
                                     <exclude>*-sources.jar</exclude>
                                     <exclude>*-javadoc.jar</exclude>
@@ -192,9 +191,7 @@
                             <path>
                                 <from>${project.basedir}/../dazzleduck-sql-client/target</from>
                                 <into>/app/extra</into>
-                                <includes>
-                                    <include>dazzleduck-sql-client-*.jar</include>
-                                </includes>
+                                <includes><include>dazzleduck-sql-client-*.jar</include></includes>
                                 <excludes>
                                     <exclude>*-sources.jar</exclude>
                                     <exclude>*-javadoc.jar</exclude>
@@ -204,16 +201,13 @@
                             <path>
                                 <from>${project.basedir}/../dazzleduck-sql-client-grpc/target</from>
                                 <into>/app/extra</into>
-                                <includes>
-                                    <include>dazzleduck-sql-client-grpc-*.jar</include>
-                                </includes>
+                                <includes><include>dazzleduck-sql-client-grpc-*.jar</include></includes>
                                 <excludes>
                                     <exclude>*-sources.jar</exclude>
                                     <exclude>*-javadoc.jar</exclude>
                                     <exclude>*-tests.jar</exclude>
                                 </excludes>
                             </path>
-                            <!-- Plugin dependencies (deduplication happens at runtime via classpath order) -->
                             <path>
                                 <from>${project.basedir}/../dazzleduck-sql-logback/target/dependency</from>
                                 <into>/app/extra</into>
@@ -230,15 +224,11 @@
                                 <from>${project.basedir}/../dazzleduck-sql-client-grpc/target/dependency</from>
                                 <into>/app/extra</into>
                             </path>
-                            <!-- Add entrypoint script -->
                             <path>
                                 <from>${project.basedir}/docker</from>
                                 <into>/app</into>
-                                <includes>
-                                    <include>entrypoint.sh</include>
-                                </includes>
+                                <includes><include>entrypoint.sh</include></includes>
                             </path>
-                            <!-- startup/ and data/ are provided by the base image (dazzleduck/base-jre) -->
                         </paths>
                         <permissions>
                             <permission>
@@ -248,6 +238,65 @@
                         </permissions>
                     </extraDirectories>
                 </configuration>
+                <executions>
+                    <!-- arm64 image — bound to package phase -->
+                    <execution>
+                        <id>docker-arm64</id>
+                        <phase>package</phase>
+                        <goals><goal>dockerBuild</goal></goals>
+                        <configuration>
+                            <from>
+                                <image>dazzleduck/base-jre:21-noble-duckdb-${duckdb.version}</image>
+                                <platforms>
+                                    <platform><os>linux</os><architecture>arm64</architecture></platform>
+                                </platforms>
+                            </from>
+                            <to>
+                                <image>dazzleduck/dazzleduck:${project.version}-arm64</image>
+                                <tags><tag>latest-arm64</tag></tags>
+                            </to>
+                        </configuration>
+                    </execution>
+                    <!-- amd64 image — bound to package phase.
+                         Requires base image to have an amd64 variant.
+                         Enable with: mvn package -DskipTests -Dskip.docker.amd64=false -->
+                    <execution>
+                        <id>docker-amd64</id>
+                        <phase>package</phase>
+                        <goals><goal>dockerBuild</goal></goals>
+                        <configuration>
+                            <skip>${skip.docker.amd64}</skip>
+                            <from>
+                                <image>dazzleduck/base-jre:21-noble-duckdb-${duckdb.version}</image>
+                                <platforms>
+                                    <platform><os>linux</os><architecture>amd64</architecture></platform>
+                                </platforms>
+                            </from>
+                            <to>
+                                <image>dazzleduck/dazzleduck:${project.version}-amd64</image>
+                                <tags><tag>latest-amd64</tag></tags>
+                            </to>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <!-- Create multi-arch manifest in verify phase (after package builds both images) -->
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>exec-maven-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>docker-manifest-create</id>
+                        <phase>verify</phase>
+                        <goals><goal>exec</goal></goals>
+                        <configuration combine.self="override">
+                            <executable>${project.basedir}/docker/manifest.sh</executable>
+                            <arguments>
+                                <argument>${project.version}</argument>
+                            </arguments>
+                        </configuration>
+                    </execution>
+                </executions>
             </plugin>
         </plugins>
     </build>

@@ -34,9 +34,22 @@ DazzleDuck SQL Server is a high-performance remote DuckDB server that supports b
 # Run tests for specific module
 ./mvnw test -pl dazzleduck-sql-http
 
-# Build Docker image
+# Build Docker image (single arch — quick local dev)
+# Apple Silicon (arm64):
+./mvnw package -DskipTests jib:dockerBuild -pl dazzleduck-sql-runtime -Djib.architecture=arm64
+# x86-64 (amd64) — requires amd64 base image:
 ./mvnw package -DskipTests jib:dockerBuild -pl dazzleduck-sql-runtime
+
+# Build both arm64 + amd64 images and create a local multi-arch manifest
+# (amd64 is skipped by default until dazzleduck/base-jre has an amd64 variant;
+#  enable with -Dskip.docker.amd64=false once the base image supports it)
+./mvnw verify -DskipTests -pl dazzleduck-sql-runtime --also-make
 ```
+
+Images produced:
+- `dazzleduck/dazzleduck:{version}-arm64` / `latest-arm64`
+- `dazzleduck/dazzleduck:{version}-amd64` / `latest-amd64`  (when enabled)
+- `dazzleduck/dazzleduck:{version}` / `latest` — local manifest list (both arches)
 
 ### Maven JVM Flags
 Required for Arrow memory management:
