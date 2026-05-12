@@ -39,6 +39,11 @@ public class ConfigConstants {
     public static final String QUERY_TIMEOUT_MS_KEY = "query_timeout_ms";
     public static final String MAX_QUERY_TIMEOUT_MS_KEY = "max_query_timeout_ms";
 
+    // Cursor / open-query protection keys
+    public static final String CURSOR_TTL_MS_KEY              = "cursor_ttl_ms";
+    public static final String MAX_CURSORS_PER_IDENTITY_KEY   = "max_cursors_per_identity";
+    public static final String MAX_CURSORS_TOTAL_KEY          = "max_cursors_total";
+
     // Ingestion configuration keys
     public static final String INGESTION_KEY = "ingestion";
     public static final String MIN_BUCKET_SIZE_KEY = "min_bucket_size";
