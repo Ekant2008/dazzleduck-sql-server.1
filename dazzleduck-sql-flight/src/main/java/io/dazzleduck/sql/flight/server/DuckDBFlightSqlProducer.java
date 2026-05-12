@@ -667,8 +667,9 @@ public class DuckDBFlightSqlProducer implements FlightSqlHttpProducer, SqlProduc
             StatementHandle statementHandle,
             final CallContext context,
             final ServerStreamListener listener) {
+        DuckDBConnection connection = null;
         try {
-            var connection = getConnection(context, getAccessMode());
+            connection = getConnection(context, getAccessMode());
             String query = statementHandle.query();
             if (statementHandle.queryChecksum() != null
                     && statementHandle.signatureMismatch(secretKey)) {
@@ -683,6 +684,7 @@ public class DuckDBFlightSqlProducer implements FlightSqlHttpProducer, SqlProduc
             var statementContext = new StatementContext<>(connection, statement, query);
             var key = new CacheKey(context.peerIdentity(), statementHandle.queryId());
             statementLoadingCache.put(key, statementContext);
+            connection = null; // ownership transferred to StatementContext — do not close here
             ResultSetStreamUtil.streamResultSet(executorService,
                     statementContext,
                     key,
@@ -693,6 +695,14 @@ public class DuckDBFlightSqlProducer implements FlightSqlHttpProducer, SqlProduc
                     () -> statementLoadingCache.invalidate(key), recorder);
         } catch (Throwable e) {
             ErrorHandling.handleThrowable(listener, e);
+        } finally {
+            if (connection != null) {
+                try {
+                    connection.close();
+                } catch (Exception closeEx) {
+                    logger.atWarn().setCause(closeEx).log("Failed to close connection after error in getStreamStatement");
+                }
+            }
         }
     }
 
@@ -1422,8 +1432,7 @@ public class DuckDBFlightSqlProducer implements FlightSqlHttpProducer, SqlProduc
     protected FlightInfo getFlightInfoStatement(String query,
                                       final CallContext context,
                                       final FlightDescriptor descriptor) {
-        try {
-            var connection = getConnection(context, getAccessMode());
+        try (var connection = getConnection(context, getAccessMode())) {
             query = transformQuery(context, connection, query);
         } catch (UnauthorizedException e) {
             throw CallStatus.UNAUTHORIZED.withCause(e).withDescription(e.getMessage()).toRuntimeException();
