@@ -11,6 +11,7 @@
     </parent>
 
     <artifactId>dazzleduck-sql-examples</artifactId>
+    <packaging>pom</packaging>
     <name>DazzleDuck SQL Examples</name>
     <description>Docker-compose integration tests for DazzleDuck example demos</description>
 
