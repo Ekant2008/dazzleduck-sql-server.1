@@ -114,6 +114,7 @@ public final class FlightSqlProducerFactory {
         private Duration maxQueryTimeout;
         private Clock clock;
         private IngestionConfig ingestionConfig;
+        private CursorConfig cursorConfig;
         private FlightRecorder flightRecorder;
 
         private ProducerBuilder(Config config) {
@@ -160,6 +161,9 @@ public final class FlightSqlProducerFactory {
 
             // Ingestion config
             this.ingestionConfig = loadIngestionConfig(config);
+
+            // Cursor protection config
+            this.cursorConfig = CursorConfig.fromConfig(config);
 
             // Load providers (query optimizer, post-ingestion factory)
             try {
@@ -512,7 +516,8 @@ public final class FlightSqlProducerFactory {
                     clock,
                     finalRecorder,
                     ingestionConfig,
-                    dataProcessorLocations
+                    dataProcessorLocations,
+                    cursorConfig
                 );
             }
         }

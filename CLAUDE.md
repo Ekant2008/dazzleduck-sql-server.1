@@ -119,12 +119,23 @@ dazzleduck-sql-server/
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/v1/login` | POST | Authenticate, get JWT token |
-| `/v1/query` | GET/POST | Execute SQL queries (Arrow format) |
+| `/v1/query` | GET/POST | Execute SQL queries — Arrow IPC (default) or TSV (via `Accept` header) |
 | `/v1/plan` | POST | Generate query execution plan |
 | `/v1/ingest` | POST | Ingest Arrow data to Parquet |
 | `/v1/cancel` | POST | Cancel running query |
 | `/v1/ui` | GET | Web UI dashboard |
 | `/health` | GET | Health check |
+
+**Query response formats**
+
+`/v1/query` content-negotiates on the `Accept` header:
+
+| `Accept` header | Response `Content-Type` | Notes |
+|---|---|---|
+| *(absent / default)* | `application/vnd.apache.arrow.stream` | Compressed Arrow IPC (ZSTD by default) |
+| `text/tab-separated-values` | `text/tab-separated-values; charset=utf-8` | Plain TSV — ideal for LLM agents and scripts that cannot parse Arrow |
+
+TSV format: first row is a header line with column names; subsequent rows are tab-separated values; all values are rendered as strings.
 
 **Key Classes:**
 - `QueryService.java` - SQL query execution
@@ -423,13 +434,27 @@ Pluggable components via configuration:
 ## API Usage Examples
 
 ### HTTP Query
+
 ```bash
-# Simple query
+# Arrow IPC (default) — binary format, ZSTD-compressed
 curl "http://localhost:8081/v1/query?q=select%201"
 
-# With authentication
+# Arrow IPC with authentication
 curl -H "Authorization: Bearer <jwt-token>" "http://localhost:8081/v1/query?q=select%201"
+
+# TSV — plain text, suitable for LLM agents and shell scripts
+curl -H "Accept: text/tab-separated-values" \
+     "http://localhost:8081/v1/query?q=select%201"
+
+# TSV with authentication
+curl -H "Authorization: Bearer <jwt-token>" \
+     -H "Accept: text/tab-separated-values" \
+     "http://localhost:8081/v1/query?q=select%20*%20from%20my_table%20limit%2010"
 ```
+
+> **LLM agent tip:** Use `Accept: text/tab-separated-values` — the response is a plain-text TSV
+> that any language model or text-processing tool can read directly without an Arrow library.
+> The first line is always the column header row.
 
 ### Login
 ```bash

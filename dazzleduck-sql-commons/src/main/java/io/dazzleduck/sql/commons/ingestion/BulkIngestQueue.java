@@ -290,8 +290,13 @@ public abstract class BulkIngestQueue<T, R> implements BulkIngestQueueInterface<
         }
         var now = clock.instant();
         if (currentBucket.isEmpty()) {
-                scheduleNextTrigger(now);
-                return;
+            // Nothing to flush — schedule the next check at a full maxDelay interval.
+            // Using scheduleNextTrigger here is unsafe: when lastWrite == Instant.EPOCH
+            // (initial state), nextTrigger is decades in the past, so timeRemaining is
+            // deeply negative and Math.max(0, ...) collapses to 0, creating a tight
+            // spin-loop that consumes 100% CPU and starves all other threads.
+            executorService.schedule(this::triggerWriteIfRequired, maxDelay.toMillis(), TimeUnit.MILLISECONDS);
+            return;
         }
 
         var nextWrite = lastWrite.plus(maxDelay);

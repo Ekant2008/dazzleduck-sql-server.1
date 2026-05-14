@@ -250,6 +250,7 @@ public class DuckDBFlightSqlProducer implements FlightSqlHttpProducer, SqlProduc
     private final SqlInfoBuilder sqlInfoBuilder;
 
     private final IngestionConfig bulkIngestionConfig;
+    private final CursorConfig cursorConfig;
 
     /**
      * Wrapper for ingestion queue with lifecycle tracking metadata.
@@ -348,6 +349,27 @@ public class DuckDBFlightSqlProducer implements FlightSqlHttpProducer, SqlProduc
                                    FlightRecorder recorder,
                                    IngestionConfig bulkIngestionConfig,
                                    List<Location> dataProcessorLocations) {
+        this(serverLocation, producerId, secretKey, allocator, warehousePath, accessMode, tempDir, ingestionHandler,
+                scheduledExecutorService, defaultQueryTimeout, maxQueryTimeout, clock, recorder,
+                bulkIngestionConfig, dataProcessorLocations, CursorConfig.DEFAULT);
+    }
+
+    public DuckDBFlightSqlProducer(Location serverLocation,
+                                   String producerId,
+                                   String secretKey,
+                                   BufferAllocator allocator,
+                                   String warehousePath,
+                                   AccessMode accessMode,
+                                   Path tempDir,
+                                   IngestionHandler ingestionHandler,
+                                   ScheduledExecutorService scheduledExecutorService,
+                                   Duration defaultQueryTimeout,
+                                   Duration maxQueryTimeout,
+                                   Clock clock,
+                                   FlightRecorder recorder,
+                                   IngestionConfig bulkIngestionConfig,
+                                   List<Location> dataProcessorLocations,
+                                   CursorConfig cursorConfig) {
         this.startTime = clock.instant();
         this.serverLocation = serverLocation;
         this.dataProcessorLocations.addAll(dataProcessorLocations);
@@ -372,6 +394,7 @@ public class DuckDBFlightSqlProducer implements FlightSqlHttpProducer, SqlProduc
 
         this.ingestionHandler = ingestionHandler;
         this.bulkIngestionConfig = bulkIngestionConfig;
+        this.cursorConfig = cursorConfig;
         preparedStatementLoadingCache =
                 CacheBuilder.newBuilder()
                         .maximumSize(4000)
@@ -380,8 +403,8 @@ public class DuckDBFlightSqlProducer implements FlightSqlHttpProducer, SqlProduc
                         .build();
         statementLoadingCache =
                 CacheBuilder.newBuilder()
-                        .maximumSize(4000)
-                        .expireAfterWrite(10, TimeUnit.MINUTES)
+                        .maximumSize(cursorConfig.maxCursorsTotal())
+                        .expireAfterWrite(cursorConfig.cursorTtlMs(), TimeUnit.MILLISECONDS)
                         .removalListener(new StatementRemovalListener<>())
                         .build();
         this.warehousePath = warehousePath;
@@ -667,8 +690,9 @@ public class DuckDBFlightSqlProducer implements FlightSqlHttpProducer, SqlProduc
             StatementHandle statementHandle,
             final CallContext context,
             final ServerStreamListener listener) {
+        DuckDBConnection connection = null;
         try {
-            var connection = getConnection(context, getAccessMode());
+            connection = getConnection(context, getAccessMode());
             String query = statementHandle.query();
             if (statementHandle.queryChecksum() != null
                     && statementHandle.signatureMismatch(secretKey)) {
@@ -678,11 +702,13 @@ public class DuckDBFlightSqlProducer implements FlightSqlHttpProducer, SqlProduc
             if (statementHandle.queryChecksum() == null) {
                 query = transformQuery(context, connection, query);
             }
+            enforceCursorLimits(context.peerIdentity());
             Statement statement = connection.createStatement();
             statement.setQueryTimeout(getEffectiveQueryTimeoutSeconds(context));
             var statementContext = new StatementContext<>(connection, statement, query);
             var key = new CacheKey(context.peerIdentity(), statementHandle.queryId());
             statementLoadingCache.put(key, statementContext);
+            connection = null; // ownership transferred to StatementContext — do not close here
             ResultSetStreamUtil.streamResultSet(executorService,
                     statementContext,
                     key,
@@ -693,6 +719,14 @@ public class DuckDBFlightSqlProducer implements FlightSqlHttpProducer, SqlProduc
                     () -> statementLoadingCache.invalidate(key), recorder);
         } catch (Throwable e) {
             ErrorHandling.handleThrowable(listener, e);
+        } finally {
+            if (connection != null) {
+                try {
+                    connection.close();
+                } catch (Exception closeEx) {
+                    logger.atWarn().setCause(closeEx).log("Failed to close connection after error in getStreamStatement");
+                }
+            }
         }
     }
 
@@ -1343,6 +1377,47 @@ public class DuckDBFlightSqlProducer implements FlightSqlHttpProducer, SqlProduc
     }
 
 
+    /**
+     * Injects a live cursor entry into the cache on behalf of {@code peerIdentity}.
+     * Visible for testing only — do not call from production code.
+     */
+    void injectTestCursor(String peerIdentity) {
+        try {
+            var conn = ConnectionPool.getConnection();
+            var stmt = conn.createStatement();
+            var ctx = new StatementContext<>(conn, stmt, "SELECT 1");
+            var key = new CacheKey(peerIdentity, System.nanoTime());
+            statementLoadingCache.put(key, ctx);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    /**
+     * Enforces cursor limits before a new StatementContext is admitted.
+     * Throws a RESOURCE_EXHAUSTED FlightRuntimeException if either the
+     * server-wide total or the per-identity cap is exceeded.
+     */
+    private void enforceCursorLimits(String identity) {
+        statementLoadingCache.cleanUp();
+        long total = statementLoadingCache.size();
+        if (total >= cursorConfig.maxCursorsTotal()) {
+            throw CallStatus.RESOURCE_EXHAUSTED
+                    .withDescription("Server cursor limit reached (%d/%d). Retry later."
+                            .formatted(total, cursorConfig.maxCursorsTotal()))
+                    .toRuntimeException();
+        }
+        long perIdentity = statementLoadingCache.asMap().keySet().stream()
+                .filter(k -> k.peerIdentity().equals(identity))
+                .count();
+        if (perIdentity >= cursorConfig.maxCursorsPerIdentity()) {
+            throw CallStatus.RESOURCE_EXHAUSTED
+                    .withDescription("Too many open cursors for identity '%s' (%d/%d). Close or consume existing queries first."
+                            .formatted(identity, perIdentity, cursorConfig.maxCursorsPerIdentity()))
+                    .toRuntimeException();
+        }
+    }
+
     private static class StatementRemovalListener<T extends Statement>
             implements RemovalListener<CacheKey, StatementContext<T>> {
         @Override
@@ -1422,8 +1497,7 @@ public class DuckDBFlightSqlProducer implements FlightSqlHttpProducer, SqlProduc
     protected FlightInfo getFlightInfoStatement(String query,
                                       final CallContext context,
                                       final FlightDescriptor descriptor) {
-        try {
-            var connection = getConnection(context, getAccessMode());
+        try (var connection = getConnection(context, getAccessMode())) {
             query = transformQuery(context, connection, query);
         } catch (UnauthorizedException e) {
             throw CallStatus.UNAUTHORIZED.withCause(e).withDescription(e.getMessage()).toRuntimeException();
