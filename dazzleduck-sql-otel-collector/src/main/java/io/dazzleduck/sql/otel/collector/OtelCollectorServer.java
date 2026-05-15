@@ -1,6 +1,6 @@
 package io.dazzleduck.sql.otel.collector;
 
-import io.dazzleduck.sql.commons.ConnectionPool;
+
 import io.dazzleduck.sql.commons.auth.Validator;
 import io.dazzleduck.sql.otel.collector.auth.JwtServerInterceptor;
 import io.dazzleduck.sql.otel.collector.config.CollectorProperties;
@@ -33,12 +33,6 @@ public class OtelCollectorServer implements Closeable {
     }
 
     public void start() throws IOException {
-        String startupScript = props.getStartupScript();
-        if (startupScript != null && !startupScript.isBlank()) {
-            log.info("Executing startup script");
-            ConnectionPool.executeOnSingleton(startupScript);
-        }
-
         var handler = props.getIngestionHandler();
         var ingestionConfig = props.getIngestionConfig();
         logWriter     = new SignalWriter("logs",    handler, ingestionConfig);

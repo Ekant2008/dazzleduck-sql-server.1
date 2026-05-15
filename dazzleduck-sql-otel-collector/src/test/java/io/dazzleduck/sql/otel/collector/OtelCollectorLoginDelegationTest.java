@@ -51,6 +51,15 @@ import static org.junit.jupiter.api.Assertions.*;
  */
 public class OtelCollectorLoginDelegationTest {
 
+    @org.junit.jupiter.api.BeforeAll
+    static void loadExtensions() throws Exception {
+        // Arrow must be loaded before OtelCollectorServer starts — the server no longer
+        // runs the startup script internally; Main handles it in production.
+        io.dazzleduck.sql.commons.ConnectionPool.executeBatch(new String[]{
+                "INSTALL arrow FROM community", "LOAD arrow"
+        });
+    }
+
     static final String SECRET_KEY_BASE64 =
             "VGhpcyBpcyBhIDY0IGJpdCBsb25nIGtleSB3aGljaCBzaG91bGQgYmUgY2hhbmdlZCBpbiBwcm9kdWN0aW9uLiBTbyBjaGFuZ2UgbWUgYW5kIG1ha2Ugc3VyZSBpdHMgMTI4IGJpdCBsb25nIG9yIG1vcmU";
     static final String VALID_USER = "admin";

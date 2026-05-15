@@ -2,6 +2,7 @@ package io.dazzleduck.sql.otel.collector;
 
 import com.beust.jcommander.JCommander;
 import com.beust.jcommander.Parameter;
+import io.dazzleduck.sql.commons.ConnectionPool;
 import io.dazzleduck.sql.otel.collector.config.CollectorConfig;
 import io.dazzleduck.sql.otel.collector.config.CollectorProperties;
 import org.slf4j.Logger;
@@ -36,7 +37,16 @@ public class Main {
             return;
         }
 
-        CollectorProperties props = new CollectorConfig(args.configFile).toProperties();
+        // Run the startup script before calling toProperties() so that extensions like
+        // ducklake and arrow are loaded before DuckLakeIngestionHandler queries DuckLake metadata.
+        CollectorConfig config = new CollectorConfig(args.configFile);
+        String startupScript = config.getStartupScript();
+        if (startupScript != null && !startupScript.isBlank()) {
+            log.info("Executing startup script");
+            ConnectionPool.executeOnSingleton(startupScript);
+        }
+
+        CollectorProperties props = config.toProperties();
         OtelCollectorServer server = new OtelCollectorServer(props);
 
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
