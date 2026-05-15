@@ -1,18 +1,35 @@
 package io.dazzleduck.sql.commons.ingestion;
 
 import io.dazzleduck.sql.commons.ConnectionPool;
+import io.dazzleduck.sql.commons.Transformations;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.sql.SQLException;
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Factory for creating DuckLakePostIngestionTask instances.
- * Uses a map for fast lookup based on ingestion path.
+ * {@link IngestionHandler} backed by DuckLake metadata.
+ *
+ * <p>Two independent caches are maintained per queue:
+ * <ul>
+ *   <li><b>stateCache</b> — the refreshable state: target path, resolved transformation SQL,
+ *       and partition columns. All three are resolved together at construction time and again
+ *       lazily whenever {@link #getTargetPath}, {@link #getTransformation}, or
+ *       {@link #getPartitionBy} are called and the cached state is older than
+ *       {@code refreshInterval}. Read accessors call {@link #getOrRefreshState} which uses
+ *       {@code stateCache.compute()} to atomically check and refresh — no DuckDB round-trip
+ *       on the hot write path when state is fresh.</li>
+ *   <li><b>queueCache</b> — the {@link ParquetIngestionQueue} instance. The queue is created
+ *       exactly once per queue ID (via {@link #getOrCreateQueue}) and is never replaced unless
+ *       the target path disappears and the queue is evicted.</li>
+ * </ul>
  */
 public class DuckLakeIngestionHandler implements IngestionHandler {
 
@@ -36,29 +53,222 @@ public class DuckLakeIngestionHandler implements IngestionHandler {
 
     private final Map<String, QueueIdToTableMapping> queueIdsToTableMappings;
 
-    private final Map<String, String> queueIdToPathMapping;
+    // -----------------------------------------------------------------------
+    // Refreshable state cache — populated at init, refreshed lazily
+    // -----------------------------------------------------------------------
 
-    private final Map<String, String[]> queueIdToPartitionMapping;
+    /**
+     * {@code schemaChangeId} is MAX(schema_version) from ducklake_snapshot.
+     * It increments only on DDL (CREATE/ALTER TABLE, view changes), not on data ingestion.
+     * {@code refreshedAt} is the clock instant when this state was last confirmed/rebuilt.
+     */
+    private record QueueState(String targetPath, String transformation, String[] partitionColumns,
+                               long schemaChangeId, Instant refreshedAt) {}
 
+    private final ConcurrentHashMap<String, QueueState> stateCache = new ConcurrentHashMap<>();
 
+    // -----------------------------------------------------------------------
+    // Queue lifecycle cache — queue created once, evicted only on tombstone
+    // -----------------------------------------------------------------------
 
-    public DuckLakeIngestionHandler(Map<String, QueueIdToTableMapping> queueIdToTableMappingMap
-    ) {
-        this.queueIdsToTableMappings = queueIdToTableMappingMap;
-        var pathMap = new HashMap<String, String>();
-        var partitionMap = new HashMap<String, String[]>();
-        queueIdToTableMappingMap.values().forEach(m -> {
-            var queueId = m.ingestionQueue();
-            var path = getPathFromCatalog(m.catalog(), m.schema(), m.table());
-            var partitionColumns = getPartitionColumns(m.catalog(), m.schema(), m.table());
-            pathMap.put(queueId, path);
-            partitionMap.put(queueId, partitionColumns);
-        });
-        this.queueIdToPathMapping = pathMap;
-        this.queueIdToPartitionMapping = partitionMap;
+    private final ConcurrentHashMap<String, ParquetIngestionQueue> queueCache = new ConcurrentHashMap<>();
+
+    private final Duration refreshInterval;
+    private final Clock clock;
+
+    public DuckLakeIngestionHandler(Map<String, QueueIdToTableMapping> mappings, Duration refreshInterval) {
+        this(mappings, refreshInterval, Clock.systemUTC());
     }
 
-    private String getPathFromCatalog(String catalogName, String schema, String table) {
+    public DuckLakeIngestionHandler(Map<String, QueueIdToTableMapping> mappings, Duration refreshInterval, Clock clock) {
+        this.queueIdsToTableMappings = mappings;
+        this.refreshInterval = refreshInterval;
+        this.clock = clock;
+        mappings.forEach((id, mapping) -> stateCache.put(id, buildState(mapping, clock.instant())));
+    }
+
+    /**
+     * Convenience constructor that defaults {@code refreshInterval} to 2 minutes.
+     * Used by tests and legacy callers that do not need to tune the interval.
+     */
+    public DuckLakeIngestionHandler(Map<String, QueueIdToTableMapping> mappings) {
+        this(mappings, Duration.ofMinutes(2));
+    }
+
+    // -----------------------------------------------------------------------
+    // IngestionHandler — read accessors (refresh lazily when stale)
+    // -----------------------------------------------------------------------
+
+    @Override
+    public String getTargetPath(String queueId) {
+        QueueState s = getOrRefreshState(queueId);
+        return s != null ? s.targetPath() : null;
+    }
+
+    @Override
+    public String getTransformation(String queueId) {
+        QueueState s = getOrRefreshState(queueId);
+        return s != null ? s.transformation() : null;
+    }
+
+    @Override
+    public String[] getPartitionBy(String queueId) {
+        QueueState s = getOrRefreshState(queueId);
+        return s != null ? s.partitionColumns() : new String[0];
+    }
+
+    @Override
+    public PostIngestionTask createPostIngestionTask(IngestionResult result) {
+        QueueIdToTableMapping mapping = queueIdsToTableMappings.get(result.queueName());
+        if (mapping == null) mapping = queueIdsToTableMappings.get(extractSuffix(result.queueName()));
+        if (mapping == null) {
+            // No DuckLake mapping for this queue — write-only mode, no catalog registration.
+            logger.atDebug().log("No DuckLake mapping for queue '{}', skipping catalog registration", result.queueName());
+            return PostIngestionTask.NOOP;
+        }
+        return new DuckLakePostIngestionTask(result, mapping.catalog(), mapping.table(), mapping.schema(),
+                mapping.additionalParameters());
+    }
+
+    // -----------------------------------------------------------------------
+    // Queue lifecycle — queue is created once; state is refreshed lazily
+    // -----------------------------------------------------------------------
+
+    /**
+     * Returns the live queue for {@code queueId}, creating it on first call or evicting and
+     * returning {@code null} when the target path has disappeared.
+     *
+     * <p>State is always up-to-date when this method returns: {@link #getTargetPath} delegates
+     * to {@link #getOrRefreshState}, which uses {@code stateCache.compute()} to refresh atomically.
+     */
+    @Override
+    public ParquetIngestionQueue getOrCreateQueue(String queueId,
+                                                  QueueCreator creator,
+                                                  QueueEventListener listener) {
+        String path = getTargetPath(queueId); // triggers getOrRefreshState internally
+        if (path == null) {
+            // Path gone: evict any existing queue.
+            ParquetIngestionQueue removed = queueCache.remove(queueId);
+            if (removed != null) {
+                listener.onDeleted(queueId);
+                try { removed.close(); } catch (Exception e) {
+                    logger.atWarn().setCause(e).log("Failed to close evicted queue: {}", queueId);
+                }
+            }
+            return null;
+        }
+        // Create queue exactly once per ID.
+        return queueCache.compute(queueId, (id, existing) -> {
+            if (existing != null) return existing;
+            ParquetIngestionQueue q = creator.create(id, path);
+            listener.onCreated(id);
+            return q;
+        });
+    }
+
+    @Override
+    public java.util.List<Stats> getQueueStats() {
+        return queueCache.values().stream()
+                .map(ParquetIngestionQueue::getStats)
+                .toList();
+    }
+
+    @Override
+    public void closeQueues() {
+        queueCache.forEach((id, queue) -> {
+            try { queue.close(); } catch (Exception e) {
+                logger.atWarn().setCause(e).log("Failed to close ingestion queue: {}", id);
+            }
+        });
+        queueCache.clear();
+    }
+
+    // -----------------------------------------------------------------------
+    // Lazy refresh — single entry point used by all read accessors
+    // -----------------------------------------------------------------------
+
+    /**
+     * Returns the current (possibly just-refreshed) {@link QueueState} for {@code queueId},
+     * or {@code null} if the ID is unknown.
+     *
+     * <p>Uses {@code stateCache.compute()} to atomically check staleness and refresh in one
+     * operation — no separate read-then-write, no double map lookup.
+     */
+    private QueueState getOrRefreshState(String queueId) {
+        String key = resolveStateKey(queueId);
+        if (key == null) return null;
+        return stateCache.compute(key, (k, existing) -> {
+            if (existing != null && !existing.refreshedAt().plus(refreshInterval).isBefore(clock.instant()))
+                return existing; // still fresh — nothing to do
+            return computeRefreshedState(k, existing);
+        });
+    }
+
+    /**
+     * Resolves the canonical state-cache key for {@code queueId}: exact match first, then the
+     * last path segment as a fallback for path-style IDs like {@code /some/path/tableName}.
+     */
+    private String resolveStateKey(String queueId) {
+        if (stateCache.containsKey(queueId)) return queueId;
+        String suffix = extractSuffix(queueId);
+        return stateCache.containsKey(suffix) ? suffix : null;
+    }
+
+    // -----------------------------------------------------------------------
+    // State resolution
+    // -----------------------------------------------------------------------
+
+    /**
+     * Compute function for {@code stateCache.compute()}: checks {@code schema_version} first
+     * (cheap — one DuckDB round-trip). If unchanged, only bumps {@code refreshedAt}.
+     * If changed (or no existing state), does a full rebuild of path, transformation, and
+     * partition columns.
+     */
+    private QueueState computeRefreshedState(String key, QueueState existing) {
+        QueueIdToTableMapping mapping = queueIdsToTableMappings.get(key);
+        if (mapping == null) mapping = queueIdsToTableMappings.get(extractSuffix(key));
+        if (mapping == null) return existing; // unknown queue — leave unchanged
+
+        long currentSchemaChangeId = fetchSchemaChangeId(mapping.catalog(), mapping.schema(), mapping.table());
+        if (existing != null && existing.schemaChangeId() == currentSchemaChangeId) {
+            logger.atDebug().log("Schema unchanged (id={}) for {}.{}.{}, skipping full refresh",
+                    currentSchemaChangeId, mapping.catalog(), mapping.schema(), mapping.table());
+            return new QueueState(existing.targetPath(), existing.transformation(),
+                    existing.partitionColumns(), existing.schemaChangeId(), clock.instant());
+        }
+        return buildState(mapping, currentSchemaChangeId, clock.instant());
+    }
+
+    /**
+     * Resolves the full {@link QueueState} for a mapping by querying DuckLake metadata.
+     * Accepts a pre-fetched {@code schemaChangeId} to avoid a redundant round-trip when
+     * called from {@link #getOrRefreshState}.
+     */
+    private static QueueState buildState(QueueIdToTableMapping mapping, long schemaChangeId, Instant refreshedAt) {
+        String path           = fetchPath(mapping.catalog(), mapping.schema(), mapping.table());
+        String transformation = resolveTransformation(mapping);
+        String[] partitions   = fetchPartitionColumns(mapping.catalog(), mapping.schema(), mapping.table());
+        return new QueueState(path, transformation, partitions, schemaChangeId, refreshedAt);
+    }
+
+    /** Convenience overload that fetches schema change ID itself (used at construction time). */
+    private static QueueState buildState(QueueIdToTableMapping mapping, Instant refreshedAt) {
+        long schemaChangeId = fetchSchemaChangeId(mapping.catalog(), mapping.schema(), mapping.table());
+        return buildState(mapping, schemaChangeId, refreshedAt);
+    }
+
+    private static String resolveTransformation(QueueIdToTableMapping mapping) {
+        if (mapping.hasViewTransformation()) {
+            return resolveViewTransformationStatic(mapping.view(), mapping.inputTable());
+        }
+        return mapping.transformation();
+    }
+
+    // -----------------------------------------------------------------------
+    // DuckLake metadata queries
+    // -----------------------------------------------------------------------
+
+    private static String fetchPath(String catalogName, String schema, String table) {
         String metadataDatabase = "__ducklake_metadata_" + catalogName;
         String query = TABLE_PATH_QUERY.formatted(metadataDatabase, metadataDatabase, metadataDatabase, schema, table);
         try {
@@ -69,6 +279,28 @@ public class DuckLakeIngestionHandler implements IngestionHandler {
     }
 
     public static String[] getPartitionColumns(String catalogName, String schema, String table) {
+        return fetchPartitionColumns(catalogName, schema, table);
+    }
+
+    /**
+     * Returns {@code MAX(schema_version)} from {@code ducklake_snapshot} for the catalog.
+     * {@code schema_version} is a catalog-wide BIGINT that increments only on DDL operations
+     * (CREATE/ALTER TABLE, view changes) — not on data ingestion — making it a cheap,
+     * reliable schema-change detector with a single aggregation query.
+     */
+    static long fetchSchemaChangeId(String catalogName, String schema, String table) {
+        String db = "__ducklake_metadata_" + catalogName;
+        String query = "SELECT MAX(schema_version) FROM %s.ducklake_snapshot".formatted(db);
+        try {
+            Long id = ConnectionPool.collectFirst(query, Long.class);
+            return id != null ? id : 0L;
+        } catch (SQLException e) {
+            logger.atDebug().setCause(e).log("Failed to get schema_version for catalog {}", catalogName);
+            return 0L;
+        }
+    }
+
+    private static String[] fetchPartitionColumns(String catalogName, String schema, String table) {
         String metadataDatabase = "__ducklake_metadata_" + catalogName;
         String query = """
                 SELECT
@@ -101,46 +333,64 @@ public class DuckLakeIngestionHandler implements IngestionHandler {
         }
     }
 
-    @Override
-    public String[] getPartitionBy(String queueId) {
-        String[] cols = queueIdToPartitionMapping.get(queueId);
-        if (cols == null) {
-            cols = queueIdToPartitionMapping.get(extractSuffix(queueId));
+    // -----------------------------------------------------------------------
+    // View-based transformation resolution
+    // -----------------------------------------------------------------------
+
+    static String resolveViewTransformationStatic(String fqView, String fqInputTable) {
+        String[] viewParts  = splitFqName(fqView,       "view");
+        String[] tableParts = splitFqName(fqInputTable, "input_table");
+        String viewSql = fetchViewDefinition(viewParts[0], viewParts[1], viewParts[2]);
+        try {
+            return Transformations.rewriteTableAsThis(viewSql, tableParts[0], tableParts[1], tableParts[2]);
+        } catch (Exception e) {
+            throw new RuntimeException(
+                    "Failed to derive transformation from view '%s' replacing '%s': %s"
+                            .formatted(fqView, fqInputTable, e.getMessage()), e);
         }
-        return cols != null ? cols : new String[0];
     }
 
-    @Override
-    public PostIngestionTask createPostIngestionTask(IngestionResult result) {
-        QueueIdToTableMapping mapping = queueIdsToTableMappings.get(result.queueName());
-        // Fallback: try suffix (last path segment)
-        if (mapping == null) {
-            mapping = queueIdsToTableMappings.get(extractSuffix(result.queueName()));
+    private static String[] splitFqName(String fqName, String fieldLabel) {
+        String[] parts = fqName.split("\\.", 3);
+        if (parts.length != 3) {
+            throw new IllegalArgumentException(
+                    "%s must be fully qualified as 'catalog.schema.name', got: '%s'"
+                            .formatted(fieldLabel, fqName));
         }
-
-        if (mapping == null) {
-            throw new IllegalArgumentException("No mapping found for ingestion queue: " + result.queueName() +
-                    ". Available mappings: " + queueIdsToTableMappings.keySet());
-        }
-
-        return new DuckLakePostIngestionTask(result, mapping.catalog(), mapping.table(), mapping.schema(), mapping.additionalParameters());
+        return parts;
     }
 
-    @Override
-    public String getTargetPath(String queueId) {
-        return queueIdToPathMapping.get(queueId);
-    }
-
-    @Override
-    public String getTransformation(String queueId) {
-        QueueIdToTableMapping mapping = queueIdsToTableMappings.get(queueId);
-        if (mapping == null) {
-            mapping = queueIdsToTableMappings.get(extractSuffix(queueId));
+    private static String fetchViewDefinition(String catalog, String schema, String viewName) {
+        String query = """
+                SELECT sql
+                FROM duckdb_views()
+                WHERE database_name = '%s' AND schema_name = '%s' AND view_name = '%s'
+                """.formatted(catalog, schema, viewName);
+        try {
+            String fullSql = ConnectionPool.collectFirst(query, String.class);
+            if (fullSql == null) {
+                throw new RuntimeException("View '%s.%s.%s' not found".formatted(catalog, schema, viewName));
+            }
+            String upperFull     = fullSql.toUpperCase();
+            String upperViewName = viewName.toUpperCase();
+            int nameIdx = upperFull.indexOf(upperViewName);
+            int asIdx   = nameIdx >= 0
+                    ? upperFull.indexOf(" AS ", nameIdx + upperViewName.length())
+                    : -1;
+            if (asIdx < 0) {
+                throw new RuntimeException(
+                        "Unexpected view definition format for '%s.%s.%s': %s"
+                                .formatted(catalog, schema, viewName, fullSql));
+            }
+            return fullSql.substring(asIdx + 4).trim();
+        } catch (SQLException e) {
+            throw new RuntimeException(
+                    "Failed to fetch definition for view '%s.%s.%s'".formatted(catalog, schema, viewName), e);
         }
-        return mapping != null ? mapping.transformation() : null;
     }
 
-    // extracting last path segment of queueName (eg. log, metric)
+    // -----------------------------------------------------------------------
+
     private String extractSuffix(String queueName) {
         String normalized = queueName.replace("\\", "/");
         int lastSlash = normalized.lastIndexOf('/');

@@ -118,8 +118,7 @@ public class OtelCollectorLoginDelegationTest {
 
             CollectorProperties props = new CollectorProperties();
             props.setGrpcPort(otelPort);
-            props.setLogIngestionConfig(new io.dazzleduck.sql.otel.collector.config.SignalIngestionConfig(
-                    outputPath.toString(), java.util.List.of(), null, 1_048_576L, 5000L));
+            props.setIngestionHandler(noopHandler(outputPath.toString()));
             props.setAuthentication("jwt");
             props.setSecretKey(SECRET_KEY_BASE64);
             props.setLoginUrl("http://localhost:" + stubPort + "/v1/login");
@@ -248,8 +247,7 @@ public class OtelCollectorLoginDelegationTest {
 
             CollectorProperties props = new CollectorProperties();
             props.setGrpcPort(otelPort);
-            props.setLogIngestionConfig(new io.dazzleduck.sql.otel.collector.config.SignalIngestionConfig(
-                    outputPath.toString(), java.util.List.of(), null, 1_048_576L, 5000L));
+            props.setIngestionHandler(noopHandler(outputPath.toString()));
             props.setAuthentication("jwt");
             props.setSecretKey(SECRET_KEY_BASE64);
             props.setUsers(Map.of(VALID_USER, VALID_PASS));
@@ -326,8 +324,9 @@ public class OtelCollectorLoginDelegationTest {
 
             CollectorProperties props = new CollectorProperties();
             props.setGrpcPort(otelPort);
-            props.setLogIngestionConfig(new io.dazzleduck.sql.otel.collector.config.SignalIngestionConfig(
-                    outputPath.toString(), java.util.List.of(), "severity_number * 2 as doubled_severity", 1L, 60_000L));
+            props.setIngestionHandler(noopHandler(outputPath.toString(),
+                    "SELECT *, severity_number * 2 as doubled_severity FROM __this"));
+            props.setIngestionConfig(ingestionConfig(1L, 60_000L));
             props.setAuthentication("jwt");
             props.setSecretKey(SECRET_KEY_BASE64);
 
@@ -400,8 +399,8 @@ public class OtelCollectorLoginDelegationTest {
 
             CollectorProperties props = new CollectorProperties();
             props.setGrpcPort(otelPort);
-            props.setTraceIngestionConfig(new io.dazzleduck.sql.otel.collector.config.SignalIngestionConfig(
-                    tracesOutputPath.toString(), java.util.List.of(), null, 1L, 60_000L));
+            props.setIngestionHandler(noopHandler(tracesOutputPath.toString()));
+            props.setIngestionConfig(ingestionConfig(1L, 60_000L));
             props.setAuthentication("jwt");
             props.setSecretKey(SECRET_KEY_BASE64);
 
@@ -479,8 +478,8 @@ public class OtelCollectorLoginDelegationTest {
 
             CollectorProperties props = new CollectorProperties();
             props.setGrpcPort(otelPort);
-            props.setMetricIngestionConfig(new io.dazzleduck.sql.otel.collector.config.SignalIngestionConfig(
-                    metricsOutputPath.toString(), java.util.List.of(), null, 1L, 60_000L));
+            props.setIngestionHandler(noopHandler(metricsOutputPath.toString()));
+            props.setIngestionConfig(ingestionConfig(1L, 60_000L));
             props.setAuthentication("jwt");
             props.setSecretKey(SECRET_KEY_BASE64);
 
@@ -528,5 +527,38 @@ public class OtelCollectorLoginDelegationTest {
                     "SELECT name, metric_type, value_double FROM read_parquet('" + metricsOutputPath + "')"
             );
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // Test helpers — replace setXIngestionConfig with handler + IngestionConfig
+    // -----------------------------------------------------------------------
+
+    /** NOOP handler that returns {@code outputPath} for every queue ID. */
+    private static io.dazzleduck.sql.commons.ingestion.IngestionHandler noopHandler(String outputPath) {
+        return noopHandler(outputPath, null);
+    }
+
+    private static io.dazzleduck.sql.commons.ingestion.IngestionHandler noopHandler(
+            String outputPath, String transformation) {
+        return new io.dazzleduck.sql.commons.ingestion.IngestionHandler() {
+            @Override public io.dazzleduck.sql.commons.ingestion.PostIngestionTask
+            createPostIngestionTask(io.dazzleduck.sql.commons.ingestion.IngestionResult r) {
+                return io.dazzleduck.sql.commons.ingestion.PostIngestionTask.NOOP;
+            }
+            @Override public String getTargetPath(String id) { return outputPath; }
+            @Override public String[] getPartitionBy(String id) { return new String[0]; }
+            @Override public String getTransformation(String id) { return transformation; }
+        };
+    }
+
+    private static io.dazzleduck.sql.commons.ingestion.IngestionConfig ingestionConfig(
+            long minBucketSize, long maxDelayMs) {
+        return new io.dazzleduck.sql.commons.ingestion.IngestionConfig(
+                minBucketSize,
+                io.dazzleduck.sql.commons.ingestion.IngestionConfig.DEFAULT_MAX_BUCKET_SIZE,
+                io.dazzleduck.sql.commons.ingestion.IngestionConfig.DEFAULT_MAX_BATCHES,
+                io.dazzleduck.sql.commons.ingestion.IngestionConfig.DEFAULT_MAX_PENDING_WRITE,
+                java.time.Duration.ofMillis(maxDelayMs),
+                io.dazzleduck.sql.commons.ingestion.IngestionConfig.DEFAULT_CONFIG_REFRESH);
     }
 }

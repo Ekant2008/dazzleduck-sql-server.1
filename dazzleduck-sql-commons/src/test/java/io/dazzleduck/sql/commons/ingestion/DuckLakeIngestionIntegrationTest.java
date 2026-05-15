@@ -248,10 +248,11 @@ class DuckLakeIngestionIntegrationTest {
                                                           String transformation,
                                                           DeterministicScheduler scheduler,
                                                           MutableClock clock) {
+        // transformation is already in the handler's mapping — the queue reads it via getTransformation()
         return new ParquetIngestionQueue(
                 "test-app", "parquet",
                 outputDir.toString(), TABLE,
                 1L, Long.MAX_VALUE, Integer.MAX_VALUE, Long.MAX_VALUE,
-                Duration.ofSeconds(5), factory, scheduler, clock, transformation);
+                Duration.ofSeconds(5), factory, scheduler, clock);
     }
 }

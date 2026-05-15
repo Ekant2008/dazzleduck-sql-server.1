@@ -28,6 +28,7 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -376,18 +377,28 @@ public class DuckLakeFlightBulkIngestTest {
     }
 
     /**
-     * Test transformation change behavior when the transformation is updated in the handler.
-     * This creates a new producer with 0 refresh delay so refresh happens immediately.
+     * Verifies that ParquetIngestionQueue reads getTransformation() from the handler on every
+     * write, so a transformation change is picked up immediately on the next ingest — no
+     * queue recreation or setTransformation() call required.
      */
     @Test
     @Timeout(value = 30, unit = TimeUnit.SECONDS)
     @Order(4)
     void transformationChange_whenUpdated_shouldApplyNewTransformation() throws Exception {
-        // Create a new producer with 0 refresh delay for immediate refresh
-        var initialMapping = new QueueIdToTableMapping(KNOWN_QUEUE, DUCKLAKE_CATALOG, "main", "events",
-                Map.of("col1", "1"),  // Initial transformation
-                "select id * 100 as 'id' from __this");
-        var transformHandler = new DuckLakeIngestionHandler(Map.of(KNOWN_QUEUE, initialMapping));
+        // Mutable transformation ref — changing it mid-test proves the queue reads live.
+        var currentTransformation = new AtomicReference<>("select id * 100 as id from __this");
+
+        // Base mapping (provides path, partition); transformation comes from the AtomicReference.
+        var baseMapping = new QueueIdToTableMapping(KNOWN_QUEUE, DUCKLAKE_CATALOG, "main", "events", Map.of(), null);
+        var baseHandler = new DuckLakeIngestionHandler(Map.of(KNOWN_QUEUE, baseMapping));
+
+        // Wrap: delegate everything to baseHandler but read transformation from the ref.
+        var transformHandler = new io.dazzleduck.sql.commons.ingestion.IngestionHandler() {
+            @Override public io.dazzleduck.sql.commons.ingestion.PostIngestionTask createPostIngestionTask(io.dazzleduck.sql.commons.ingestion.IngestionResult r) { return baseHandler.createPostIngestionTask(r); }
+            @Override public String getTargetPath(String id) { return baseHandler.getTargetPath(id); }
+            @Override public String[] getPartitionBy(String id) { return baseHandler.getPartitionBy(id); }
+            @Override public String getTransformation(String id) { return currentTransformation.get(); }
+        };
 
         Location testLocation = FlightTestUtils.findNextLocation();
         String testProducerId = UUID.randomUUID().toString();
@@ -447,20 +458,9 @@ public class DuckLakeFlightBulkIngestTest {
                 assertEquals(5L, transformedCount, "Expected 5 rows with initial transformation applied");
             }
 
-            // Step 2: Update the transformation (simulate transformation change)
-            var updatedMapping = new QueueIdToTableMapping(KNOWN_QUEUE, DUCKLAKE_CATALOG, "main", "events",
-                    Map.of("col1", "2"),  // Updated transformation
-                    "select id * 100000 as 'id' from __this");
-            var updatedHandler = new DuckLakeIngestionHandler(Map.of(KNOWN_QUEUE, updatedMapping));
-            // Replace the handler via reflection to simulate transformation change
-            var ingestionHandlerField = DuckDBFlightSqlProducer.class.getDeclaredField("ingestionHandler");
-            ingestionHandlerField.setAccessible(true);
-            ingestionHandlerField.set(testProducer, updatedHandler);
-
-            // Step 3: Trigger refresh by calling getOrCreateIngestionQueue
-            // Since configRefreshDelay is 0, this will immediately refresh
-            var queue = testProducer.getOrCreateIngestionQueue(KNOWN_QUEUE);
-            assertNotNull(queue, "Queue should still exist after transformation update");
+            // Step 2: Update the transformation — no reflection, no restart required.
+            // The queue reads getTransformation() on every write, so the next ingest picks it up.
+            currentTransformation.set("select id * 100000 as id from __this");
 
             // Step 4: Ingest more data with updated transformation
             String query2 = "SELECT i AS id, i AS col1 FROM range(6, 11) t(i)";

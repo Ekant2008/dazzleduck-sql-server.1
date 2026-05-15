@@ -2,6 +2,54 @@ package io.dazzleduck.sql.commons.ingestion;
 
 import java.util.Map;
 
-public record QueueIdToTableMapping(String ingestionQueue, String catalog, String schema, String table, Map<String, String> additionalParameters, String transformation) {
+/**
+ * Maps an ingestion queue to a target DuckLake table and its optional transformation.
+ *
+ * <p>Exactly one of the following must hold:
+ * <ul>
+ *   <li>{@code view} and {@code inputTable} are both non-null — transformation is derived
+ *       at runtime by reading the view definition and replacing {@code inputTable} with
+ *       the {@code __this} CTE placeholder.</li>
+ *   <li>{@code transformation} is non-null — explicit SQL transformation referencing
+ *       {@code __this}.</li>
+ *   <li>All three are null — data is written as-is with no transformation.</li>
+ * </ul>
+ *
+ * @param view        fully-qualified view name ({@code catalog.schema.view}), nullable
+ * @param inputTable  fully-qualified table name inside the view to replace with {@code __this}
+ *                    ({@code catalog.schema.table}), nullable; required when {@code view} is set
+ */
+public record QueueIdToTableMapping(
+        String ingestionQueue,
+        String catalog,
+        String schema,
+        String table,
+        Map<String, String> additionalParameters,
+        String transformation,
+        String view,
+        String inputTable) {
 
+    /** Validates invariants on every construction path. */
+    public QueueIdToTableMapping {
+        if ((view == null) != (inputTable == null)) {
+            throw new IllegalArgumentException(
+                    "Queue '%s': 'view' and 'input_table' must both be provided or both omitted"
+                            .formatted(ingestionQueue));
+        }
+        if (transformation != null && view != null) {
+            throw new IllegalArgumentException(
+                    "Queue '%s': 'transformation' and 'view'/'input_table' are mutually exclusive"
+                            .formatted(ingestionQueue));
+        }
+    }
+
+    /** Convenience constructor for mappings that use an explicit transformation or none at all. */
+    public QueueIdToTableMapping(String ingestionQueue, String catalog, String schema, String table,
+                                 Map<String, String> additionalParameters, String transformation) {
+        this(ingestionQueue, catalog, schema, table, additionalParameters, transformation, null, null);
+    }
+
+    public boolean hasViewTransformation() {
+        return view != null; // inputTable non-null is guaranteed by the constructor invariant
+    }
 }

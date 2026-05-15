@@ -109,27 +109,28 @@ class DuckLakeIngestionHandlerTest {
     }
 
     // -----------------------------------------------------------------------
-    // createPostIngestionTask — no mapping found
+    // createPostIngestionTask — no mapping found → NOOP (not an error)
     // -----------------------------------------------------------------------
 
     @Test
-    void shouldThrowForUnknownQueueIdWithNoSuffixMatch() {
+    void shouldReturnNoopForUnknownQueueIdWithNoSuffixMatch() {
+        // A unified handler may serve signals that have no DuckLake mapping (e.g. traces/metrics
+        // in a config where only logs are registered in DuckLake). NOOP is the correct result.
         var factory = new DuckLakeIngestionHandler(Map.of(QUEUE_ID, mapping(QUEUE_ID, null)));
         var result = new IngestionResult("completely-unknown", 1L, "app", Map.of(), 0L, List.of());
-        var ex = assertThrows(IllegalArgumentException.class,
-                () -> factory.createPostIngestionTask(result));
-        assertTrue(ex.getMessage().contains("completely-unknown"),
-                "Error should contain the unknown queue name");
-        assertTrue(ex.getMessage().contains(QUEUE_ID),
-                "Error should list available mappings");
+        PostIngestionTask task = factory.createPostIngestionTask(result);
+        assertNotNull(task, "Should return NOOP task, not null");
+        task.execute(); // must not throw
     }
 
     @Test
-    void shouldThrowWhenPathSuffixDoesNotMatchAnyMappingKey() {
+    void shouldReturnNoopWhenPathSuffixDoesNotMatchAnyMappingKey() {
         var factory = new DuckLakeIngestionHandler(Map.of(QUEUE_ID, mapping(QUEUE_ID, null)));
         // last segment is "other", not "events"
         var result = new IngestionResult("/tmp/output/other", 1L, "app", Map.of(), 0L, List.of());
-        assertThrows(IllegalArgumentException.class, () -> factory.createPostIngestionTask(result));
+        PostIngestionTask task = factory.createPostIngestionTask(result);
+        assertNotNull(task, "Should return NOOP task, not null");
+        task.execute(); // must not throw
     }
 
     // -----------------------------------------------------------------------

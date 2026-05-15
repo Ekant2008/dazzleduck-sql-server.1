@@ -406,15 +406,14 @@ public class ParquetIngestionQueueTest {
     public void testTransformationSelectsSubsetOfColumns() throws Exception {
         var service = new DeterministicScheduler();
         var clock = new MutableClock(Instant.now(), ZoneId.systemDefault());
-        var postTaskFactory = createPostTaskFactory(new AtomicBoolean(), false);
-
         // Source has: id, value, category — transformation drops category
         String transformation = "SELECT id, value FROM __this";
+        var postTaskFactory = createPostTaskFactory(new AtomicBoolean(), false, transformation);
 
         try (var queue = new ParquetIngestionQueue(
                 TEST_APP_ID, INPUT_FORMAT, targetPath.toString(), "test-queue",
                 DEFAULT_MIN_BATCH_SIZE, Long.MAX_VALUE, Integer.MAX_VALUE, Long.MAX_VALUE,
-                DEFAULT_MAX_DELAY, postTaskFactory, service, clock, transformation)) {
+                DEFAULT_MAX_DELAY, postTaskFactory, service, clock)) {
 
             var future = queue.add(createBatch(sourceFile1.toString(), "producer1", 0, DEFAULT_MIN_BATCH_SIZE + 1));
             service.tick(1, TimeUnit.MILLISECONDS);
@@ -431,15 +430,14 @@ public class ParquetIngestionQueueTest {
     public void testTransformationWithDerivedColumn() throws Exception {
         var service = new DeterministicScheduler();
         var clock = new MutableClock(Instant.now(), ZoneId.systemDefault());
-        var postTaskFactory = createPostTaskFactory(new AtomicBoolean(), false);
-
         // Transformation replaces value with doubled_value = value * 2
         String transformation = "SELECT id, value * 2 AS doubled_value FROM __this";
+        var postTaskFactory = createPostTaskFactory(new AtomicBoolean(), false, transformation);
 
         try (var queue = new ParquetIngestionQueue(
                 TEST_APP_ID, INPUT_FORMAT, targetPath.toString(), "test-queue",
                 DEFAULT_MIN_BATCH_SIZE, Long.MAX_VALUE, Integer.MAX_VALUE, Long.MAX_VALUE,
-                DEFAULT_MAX_DELAY, postTaskFactory, service, clock, transformation)) {
+                DEFAULT_MAX_DELAY, postTaskFactory, service, clock)) {
 
             var future = queue.add(createBatch(sourceFile1.toString(), "producer1", 0, DEFAULT_MIN_BATCH_SIZE + 1));
             service.tick(1, TimeUnit.MILLISECONDS);
@@ -456,15 +454,14 @@ public class ParquetIngestionQueueTest {
     public void testTransformationWithFilter() throws Exception {
         var service = new DeterministicScheduler();
         var clock = new MutableClock(Instant.now(), ZoneId.systemDefault());
-        var postTaskFactory = createPostTaskFactory(new AtomicBoolean(), false);
-
         // Source has 100 rows with id 0–99; filter keeps id >= 50 (50 rows)
         String transformation = "SELECT * FROM __this WHERE id >= 50";
+        var postTaskFactory = createPostTaskFactory(new AtomicBoolean(), false, transformation);
 
         try (var queue = new ParquetIngestionQueue(
                 TEST_APP_ID, INPUT_FORMAT, targetPath.toString(), "test-queue",
                 DEFAULT_MIN_BATCH_SIZE, Long.MAX_VALUE, Integer.MAX_VALUE, Long.MAX_VALUE,
-                DEFAULT_MAX_DELAY, postTaskFactory, service, clock, transformation)) {
+                DEFAULT_MAX_DELAY, postTaskFactory, service, clock)) {
 
             var future = queue.add(createBatch(sourceFile1.toString(), "producer1", 0, DEFAULT_MIN_BATCH_SIZE + 1));
             service.tick(1, TimeUnit.MILLISECONDS);
@@ -481,15 +478,14 @@ public class ParquetIngestionQueueTest {
     public void testTransformationAppliedAcrossMultipleBatches() throws Exception {
         var service = new DeterministicScheduler();
         var clock = new MutableClock(Instant.now(), ZoneId.systemDefault());
-        var postTaskFactory = createPostTaskFactory(new AtomicBoolean(), false);
-
         // Two source files (100 + 50 rows); transformation selects only id and value
         String transformation = "SELECT id, value FROM __this";
+        var postTaskFactory = createPostTaskFactory(new AtomicBoolean(), false, transformation);
 
         try (var queue = new ParquetIngestionQueue(
                 TEST_APP_ID, INPUT_FORMAT, targetPath.toString(), "test-queue",
                 DEFAULT_SMALL_BATCH_SIZE, Long.MAX_VALUE, Integer.MAX_VALUE, Long.MAX_VALUE,
-                DEFAULT_MAX_DELAY, postTaskFactory, service, clock, transformation)) {
+                DEFAULT_MAX_DELAY, postTaskFactory, service, clock)) {
 
             var future1 = queue.add(createBatch(sourceFile1.toString(), "producer1", 0, 600));
             var future2 = queue.add(createBatch(sourceFile2.toString(), "producer1", 1, 600));
@@ -514,7 +510,7 @@ public class ParquetIngestionQueueTest {
         try (var queue = new ParquetIngestionQueue(
                 TEST_APP_ID, INPUT_FORMAT, targetPath.toString(), "test-queue",
                 DEFAULT_MIN_BATCH_SIZE, Long.MAX_VALUE, Integer.MAX_VALUE, Long.MAX_VALUE,
-                DEFAULT_MAX_DELAY, postTaskFactory, service, clock, null)) {
+                DEFAULT_MAX_DELAY, postTaskFactory, service, clock)) {
 
             var future = queue.add(createBatch(sourceFile1.toString(), "producer1", 0, DEFAULT_MIN_BATCH_SIZE + 1));
             service.tick(1, TimeUnit.MILLISECONDS);
@@ -557,6 +553,11 @@ public class ParquetIngestionQueueTest {
     }
 
     private IngestionHandler createPostTaskFactory(AtomicBoolean executed, boolean shouldFail) {
+        return createPostTaskFactory(executed, shouldFail, null);
+    }
+
+    private IngestionHandler createPostTaskFactory(AtomicBoolean executed, boolean shouldFail,
+                                                   String transformation) {
         return new IngestionHandler() {
             @Override
             public PostIngestionTask createPostIngestionTask(IngestionResult ingestionResult) {
@@ -572,14 +573,13 @@ public class ParquetIngestionQueueTest {
             }
 
             @Override
-            public String getTargetPath(String queueId) {
-                return null;
-            }
+            public String getTargetPath(String queueId) { return null; }
 
             @Override
-            public String[] getPartitionBy(String queueId) {
-                return new String[0];
-            }
+            public String[] getPartitionBy(String queueId) { return new String[0]; }
+
+            @Override
+            public String getTransformation(String queueId) { return transformation; }
         };
     }
 }

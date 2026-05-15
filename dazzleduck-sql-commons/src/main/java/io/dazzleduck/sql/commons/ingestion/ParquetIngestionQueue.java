@@ -30,24 +30,21 @@ public class ParquetIngestionQueue extends BulkIngestQueue<String, IngestionResu
     private final IngestionHandler postIngestionHandler;
     private final String applicationId;
     private final String inputFormat;
-    private volatile String transformation;
-
-
 
     /**
-     * Thw write will be performed as soon as bucket is full or after the maxDelay is exported since the first batch is inserted
-     * @param applicationId
-     * @param inputFormat
-     * @param outputPath
-     * @param ingestionQueue  the ingestion queue identifier used for mapping to target tables
-     * @param minBucketSize   size of the bucket. Write will be performed as soon as bucket is reached to this size or more
-     * @param maxBucketSize   maximum size of the bucket. Bucket will be flushed before exceeding this size
-     * @param maxBatches      maximum number of batches in a bucket. Write will be performed when this limit is reached
-     * @param maxPendingWrite maximum pending bytes allowed before rejecting new batches
-     * @param maxDelay        write will be performed just after this delay.
-     * @param postIngestionHandler
-     * @param executorService Executor service.
-     * @param clock
+     * @param applicationId    producer identifier
+     * @param inputFormat      source file format (e.g. {@code "parquet"}, {@code "arrow"})
+     * @param outputPath       destination path for written Parquet files
+     * @param ingestionQueue   queue identifier — passed to {@link IngestionHandler#getTransformation}
+     *                         on every write so the transformation is always current
+     * @param minBucketSize    flush when accumulated size reaches this threshold (bytes)
+     * @param maxBucketSize    hard upper limit before forced flush (bytes)
+     * @param maxBatches       max number of batches before forced flush
+     * @param maxPendingWrite  backpressure limit (bytes)
+     * @param maxDelay         time-based flush interval
+     * @param postIngestionHandler handler that provides transformation SQL and post-write tasks
+     * @param executorService  scheduler for time-based flush
+     * @param clock            clock for scheduling
      */
     public ParquetIngestionQueue(String applicationId,
                                  String inputFormat,
@@ -61,30 +58,12 @@ public class ParquetIngestionQueue extends BulkIngestQueue<String, IngestionResu
                                  IngestionHandler postIngestionHandler,
                                  ScheduledExecutorService executorService,
                                  Clock clock) {
-        this(applicationId, inputFormat, outputPath, ingestionQueue, minBucketSize, maxBucketSize,
-                maxBatches, maxPendingWrite, maxDelay, postIngestionHandler, executorService, clock, null);
-    }
-
-    public ParquetIngestionQueue(String applicationId,
-                                 String inputFormat,
-                                 String outputPath,
-                                 String ingestionQueue,
-                                 long minBucketSize,
-                                 long maxBucketSize,
-                                 int maxBatches,
-                                 long maxPendingWrite,
-                                 Duration maxDelay,
-                                 IngestionHandler postIngestionHandler,
-                                 ScheduledExecutorService executorService,
-                                 Clock clock,
-                                 String transformation) {
         super(ingestionQueue, minBucketSize, maxBucketSize, maxBatches, maxPendingWrite, maxDelay, executorService, clock);
         this.outputPath = outputPath;
         this.queueId = ingestionQueue;
         this.postIngestionHandler = postIngestionHandler;
         this.applicationId = applicationId;
         this.inputFormat = inputFormat;
-        this.transformation = transformation;
     }
 
     @Override
@@ -123,17 +102,6 @@ public class ParquetIngestionQueue extends BulkIngestQueue<String, IngestionResu
         }
     }
 
-    public void setTransformation(String transformation) {
-        validateTransformation(transformation);
-        this.transformation = transformation;
-    }
-
-    protected void validateTransformation(String transformation) {
-        if (transformation != null && !transformation.isBlank()) {
-            DuckLakeIngestionTaskFactoryProvider.validateTransformation(queueId, transformation);
-        }
-    }
-
     private String getClause(String[] values, String clause){
         if(values == null || values.length == 0){
             return "";
@@ -166,8 +134,9 @@ public class ParquetIngestionQueue extends BulkIngestQueue<String, IngestionResu
         // Inner SQL reads from the temp Arrow files
         var innerSql = "SELECT * FROM read_%s([%s]) %s".formatted(this.inputFormat, arrowFiles, sortOrderClause);
 
-        // If a transformation is configured, wrap the inner SQL as a CTE named __this
-        // and use the transformation query (e.g. "SELECT a, b, c FROM __this") as the outer query.
+        // Fetch transformation fresh from the handler on every write so view-based
+        // and handler-refreshed transformations are always current without caching.
+        String transformation = postIngestionHandler.getTransformation(queueId);
         var querySql = (transformation != null && !transformation.isBlank())
                 ? "WITH __this AS (%s) %s".formatted(innerSql, transformation)
                 : innerSql;

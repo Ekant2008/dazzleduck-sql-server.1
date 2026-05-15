@@ -1,10 +1,10 @@
 package io.dazzleduck.sql.otel.collector;
 
 import io.dazzleduck.sql.commons.ingestion.Batch;
+import io.dazzleduck.sql.commons.ingestion.IngestionConfig;
 import io.dazzleduck.sql.commons.ingestion.IngestionHandler;
 import io.dazzleduck.sql.commons.ingestion.ParquetIngestionQueue;
 import io.dazzleduck.sql.commons.ingestion.Stats;
-import io.dazzleduck.sql.otel.collector.config.SignalIngestionConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -13,51 +13,45 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Clock;
-import java.time.Duration;
 import java.time.Instant;
-import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.TimeUnit;
 
 /**
  * Accepts Arrow batches from OTLP services, spills each batch to a temp Arrow
- * file on disk, and delegates batching + Parquet writing to
- * {@link ParquetIngestionQueue}.
+ * file on disk, and delegates batching + Parquet writing to {@link ParquetIngestionQueue}.
  *
- * <p>DuckDB reads all accumulated Arrow files in one
- * {@code COPY (SELECT * FROM read_arrow([...])) TO outputPath} statement,
- * which is more efficient than writing one Parquet file per batch.
+ * <p>The queue is created once via {@link IngestionHandler#getOrCreateQueue}. State refresh
+ * (output path, transformation, partition columns) is handled lazily inside the handler —
+ * {@link #addBatch} calls {@code getOrCreateQueue} on every batch so the handler's stale-state
+ * check runs automatically without a separate scheduler.
  *
- * <p>Flush is triggered when accumulated file bytes reach {@code minBucketSizeBytes}
- * or after {@code maxDelayMs} elapses since the first batch in the current bucket.
- *
- * <p>The transformation is refreshed every 2 minutes from
- * {@link IngestionHandler#getTransformation(String)} using the signal's queue ID.
+ * <p>Queue tuning parameters (bucket sizes, flush delay) come from {@link IngestionConfig},
+ * following the same pattern as the flight module.
  */
 public class SignalWriter implements Closeable {
 
     private static final Logger log = LoggerFactory.getLogger(SignalWriter.class);
 
-    private static final long MAX_BUCKET_SIZE   = 100L * 1024 * 1024; // 100 MB
-    private static final long MAX_PENDING_WRITE = 500L * 1024 * 1024; // 500 MB
-    private static final long TRANSFORMATION_REFRESH_MINUTES = 2;
-
     private final String queueId;
-    private final String outputPath;
-    private final ParquetIngestionQueue queue;
-    private final String[] partitions;
     private final ScheduledExecutorService scheduler;
+    private final IngestionHandler ingestionHandler;
+    private final IngestionHandler.QueueCreator creator;
+    private final IngestionHandler.QueueEventListener logListener;
+    /** Cached for {@link #getStats()} and {@link #close()}. */
+    private volatile ParquetIngestionQueue queue;
 
-    public SignalWriter(String queueId, SignalIngestionConfig config,
-                        IngestionHandler ingestionHandler) throws IOException {
-        this.queueId = queueId;
-        this.outputPath = config.outputPath();
+    public SignalWriter(String queueId,
+                        IngestionHandler ingestionHandler,
+                        IngestionConfig ingestionConfig) throws IOException {
+        this.queueId          = queueId;
+        this.ingestionHandler = ingestionHandler;
+
+        String outputPath = ingestionHandler.getTargetPath(queueId);
+        if (outputPath == null) outputPath = "./" + queueId;
         Files.createDirectories(Path.of(outputPath));
-        this.partitions = config.partitionBy().toArray(new String[0]);
-
-        String queueTransformation = toQueueTransformation(config.transformation());
+        final String resolvedOutputPath = outputPath;
 
         this.scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
             Thread t = new Thread(r, "otel-signal-scheduler[" + queueId + "]");
@@ -65,52 +59,47 @@ public class SignalWriter implements Closeable {
             return t;
         });
 
-        this.queue = new ParquetIngestionQueue(
-                "otel-collector",
-                "arrow",
-                outputPath,
-                queueId,
-                config.minBucketSizeBytes(),
-                MAX_BUCKET_SIZE,
-                Integer.MAX_VALUE,
-                MAX_PENDING_WRITE,
-                Duration.ofMillis(config.maxDelayMs()),
+        // _targetPath from the handler is the DuckLake table path (used for tombstone detection).
+        // resolvedOutputPath is where Arrow→Parquet files are written; it is stable for the
+        // lifetime of this writer. If the table path ever moves, tombstone detection in
+        // getOrCreateQueue() will surface it — the writer would need to be recreated.
+        this.creator = (id, _targetPath) -> new ParquetIngestionQueue(
+                "otel-collector", "arrow", resolvedOutputPath, id,
+                ingestionConfig.minBucketSize(),
+                ingestionConfig.maxBucketSize(),
+                ingestionConfig.maxBatches(),
+                ingestionConfig.maxPendingWrite(),
+                ingestionConfig.maxDelay(),
                 ingestionHandler,
-                scheduler,
-                Clock.systemUTC(),
-                queueTransformation
-        );
+                scheduler, Clock.systemUTC());
 
-        // Refresh transformation from the handler every 2 minutes.
-        // Allows DuckLake or ServiceIngestionHandler to push updates at runtime.
-        scheduler.scheduleWithFixedDelay(() -> {
-            try {
-                String updated = ingestionHandler.getTransformation(queueId);
-                queue.setTransformation(toQueueTransformation(updated));
-            } catch (Exception e) {
-                log.warn("Failed to refresh transformation for signal '{}': {}", queueId, e.getMessage());
-            }
-        }, TRANSFORMATION_REFRESH_MINUTES, TRANSFORMATION_REFRESH_MINUTES, TimeUnit.MINUTES);
+        this.logListener = new IngestionHandler.QueueEventListener() {
+            @Override public void onCreated(String id)   { log.info("Queue created: {}", id);   }
+            @Override public void onRefreshed(String id) { log.debug("Queue refreshed: {}", id); }
+            @Override public void onDeleted(String id)   { log.warn("Queue deleted: {}", id);   }
+        };
+
+        this.queue = ingestionHandler.getOrCreateQueue(queueId, creator, logListener);
+        if (this.queue == null) {
+            log.info("Handler returned no target path for '{}', using local output path: {}", queueId, resolvedOutputPath);
+            this.queue = creator.create(queueId, resolvedOutputPath);
+        }
     }
 
     /**
      * Submits an Arrow file to the ingestion queue.
-     * Returns a future that completes when the file has been written to Parquet.
+     * Calls {@code getOrCreateQueue} on each batch so the handler's lazy refresh and
+     * tombstone detection run automatically.
      */
     public CompletableFuture<Void> addBatch(Path arrowFile) {
+        ParquetIngestionQueue q = ingestionHandler.getOrCreateQueue(queueId, creator, logListener);
+        if (q == null) q = this.queue;
+        else this.queue = q;
         try {
             long fileSize = Files.size(arrowFile);
-            Batch<String> batch = new Batch<>(
-                    new String[0],
-                    partitions,
-                    arrowFile.toString(),
-                    null,
-                    0,
-                    fileSize,
-                    "parquet",
-                    Instant.now()
-            );
-            return queue.add(batch).thenApply(ignored -> null);
+            Batch<String> batch = new Batch<>(new String[0], new String[0],
+                    arrowFile.toString(), null, 0, fileSize, "parquet", Instant.now());
+            return q.add(batch).thenApply(ignored -> null);
         } catch (IOException e) {
             return CompletableFuture.failedFuture(e);
         }
@@ -129,15 +118,5 @@ public class SignalWriter implements Closeable {
         }
         scheduler.shutdown();
         log.info("SignalWriter[{}] closed", queueId);
-    }
-
-    /**
-     * Converts a user-supplied transformation expression (comma-separated SQL expressions)
-     * into the full CTE-compatible SQL expected by ParquetIngestionQueue.
-     * Returns null if the transformation is blank.
-     */
-    private static String toQueueTransformation(String transformation) {
-        if (transformation == null || transformation.isBlank()) return null;
-        return "SELECT *, " + transformation + " FROM __this";
     }
 }

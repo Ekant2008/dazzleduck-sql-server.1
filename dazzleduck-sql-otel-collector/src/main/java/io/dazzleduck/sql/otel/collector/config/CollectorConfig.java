@@ -2,7 +2,9 @@ package io.dazzleduck.sql.otel.collector.config;
 
 import com.typesafe.config.Config;
 import com.typesafe.config.ConfigFactory;
+import io.dazzleduck.sql.common.StartupScriptProvider;
 import io.dazzleduck.sql.commons.config.ConfigBasedProvider;
+import io.dazzleduck.sql.commons.ingestion.IngestionConfig;
 import io.dazzleduck.sql.commons.ingestion.IngestionHandler;
 import io.dazzleduck.sql.commons.ingestion.IngestionTaskFactoryProvider;
 import io.dazzleduck.sql.commons.ingestion.NOOPIngestionTaskFactoryProvider;
@@ -108,58 +110,41 @@ public class CollectorConfig {
         return getInt("grpc_port", 4317);
     }
 
+    /**
+     * Returns the startup SQL to execute on the singleton DuckDB connection.
+     * Delegates to {@link StartupScriptProvider#load} which reads from the
+     * {@code startup_script_provider} block ({@code content} + {@code script_location}).
+     * Falls back to the deprecated {@code startup_script} string key.
+     */
     public String getStartupScript() {
-        return getString("startup_script", "INSTALL arrow FROM community; LOAD arrow;");
-    }
-
-    public SignalIngestionConfig getLogIngestionConfig() {
-        return readSignalConfig("log_ingestion");
-    }
-
-    public SignalIngestionConfig getTraceIngestionConfig() {
-        return readSignalConfig("trace_ingestion");
-    }
-
-    public SignalIngestionConfig getMetricIngestionConfig() {
-        return readSignalConfig("metric_ingestion");
-    }
-
-    private SignalIngestionConfig readSignalConfig(String signalKey) {
-        String prefix = CONFIG_PREFIX + "." + signalKey;
-        String outputPath = config.getString(prefix + ".output_path");
-        List<String> partitionBy = List.of();
-        String transformation = null;
-        long minBucketSizeBytes = getLong("ingestion.min_bucket_size", 1_048_576L);
-        long maxDelayMs = getLong("ingestion.max_delay_ms", 5000L);
         try {
-            if (config.hasPath(prefix + ".partition_by")) {
-                partitionBy = config.getStringList(prefix + ".partition_by");
-            }
-            if (config.hasPath(prefix + ".transformation")) {
-                transformation = config.getString(prefix + ".transformation");
-            }
-            if (config.hasPath(prefix + ".min_bucket_size")) {
-                minBucketSizeBytes = config.getLong(prefix + ".min_bucket_size");
-            }
-            if (config.hasPath(prefix + ".max_delay_ms")) {
-                maxDelayMs = config.getLong(prefix + ".max_delay_ms");
-            }
+            return StartupScriptProvider.load(config.getConfig(CONFIG_PREFIX)).getStartupScript();
         } catch (Exception e) {
-            log.debug("Error reading signal config for {}: {}", signalKey, e.getMessage());
+            log.warn("Failed to read startup_script_provider, using fallback: {}", e.getMessage());
+            return getString("startup_script", "INSTALL arrow FROM community; LOAD arrow;");
         }
-        return new SignalIngestionConfig(outputPath, partitionBy, transformation, minBucketSizeBytes, maxDelayMs);
     }
 
-    public IngestionHandler getLogIngestionTaskFactory() {
-        return loadIngestionTaskFactory("log_ingestion_task_factory_provider", getLogIngestionConfig().outputPath());
+    /**
+     * Returns queue tuning parameters from the {@code otel_collector.ingestion} block,
+     * mirroring the flight module's ingestion config pattern.
+     */
+    public IngestionConfig getIngestionConfig() {
+        String path = CONFIG_PREFIX + ".ingestion";
+        if (config.hasPath(path)) {
+            return IngestionConfig.fromConfig(config.getConfig(path));
+        }
+        return new IngestionConfig(1_048_576L, IngestionConfig.DEFAULT_MAX_BUCKET_SIZE,
+                IngestionConfig.DEFAULT_MAX_BATCHES, IngestionConfig.DEFAULT_MAX_PENDING_WRITE,
+                java.time.Duration.ofSeconds(5), IngestionConfig.DEFAULT_CONFIG_REFRESH);
     }
 
-    public IngestionHandler getTraceIngestionTaskFactory() {
-        return loadIngestionTaskFactory("trace_ingestion_task_factory_provider", getTraceIngestionConfig().outputPath());
-    }
-
-    public IngestionHandler getMetricIngestionTaskFactory() {
-        return loadIngestionTaskFactory("metric_ingestion_task_factory_provider", getMetricIngestionConfig().outputPath());
+    /**
+     * Returns the single unified {@link IngestionHandler} from the top-level
+     * {@code ingestion_task_factory_provider} block.
+     */
+    public IngestionHandler getIngestionHandler() {
+        return loadIngestionTaskFactory("ingestion_task_factory_provider", "./otel-output");
     }
 
     private IngestionHandler loadIngestionTaskFactory(String providerKey, String defaultPath) {
@@ -228,12 +213,8 @@ public class CollectorConfig {
         props.setUsers(getUsers());
         props.setJwtExpiration(getJwtExpiration());
         props.setServiceName(getServiceName());
-        props.setLogIngestionConfig(getLogIngestionConfig());
-        props.setTraceIngestionConfig(getTraceIngestionConfig());
-        props.setMetricIngestionConfig(getMetricIngestionConfig());
-        props.setLogIngestionTaskFactory(getLogIngestionTaskFactory());
-        props.setTraceIngestionTaskFactory(getTraceIngestionTaskFactory());
-        props.setMetricIngestionTaskFactory(getMetricIngestionTaskFactory());
+        props.setIngestionHandler(getIngestionHandler());
+        props.setIngestionConfig(getIngestionConfig());
         return props;
     }
 
