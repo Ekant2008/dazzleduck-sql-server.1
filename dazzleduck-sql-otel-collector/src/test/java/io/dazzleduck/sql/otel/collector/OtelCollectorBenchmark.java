@@ -80,12 +80,25 @@ public class OtelCollectorBenchmark {
 
         CollectorProperties props = new CollectorProperties();
         props.setGrpcPort(port);
-        props.setLogIngestionConfig(new io.dazzleduck.sql.otel.collector.config.SignalIngestionConfig(
-                logsDir.toString(), java.util.List.of(), null, MIN_BUCKET_BYTES, 1000L));
-        props.setTraceIngestionConfig(new io.dazzleduck.sql.otel.collector.config.SignalIngestionConfig(
-                outputDir.resolve("traces").toString(), java.util.List.of(), null, MIN_BUCKET_BYTES, 1000L));
-        props.setMetricIngestionConfig(new io.dazzleduck.sql.otel.collector.config.SignalIngestionConfig(
-                outputDir.resolve("metrics").toString(), java.util.List.of(), null, MIN_BUCKET_BYTES, 1000L));
+        Map<String, String> signalPaths = Map.of(
+                "logs",    logsDir.toString(),
+                "traces",  outputDir.resolve("traces").toString(),
+                "metrics", outputDir.resolve("metrics").toString());
+        props.setIngestionHandler(new io.dazzleduck.sql.commons.ingestion.IngestionHandler() {
+            @Override public io.dazzleduck.sql.commons.ingestion.PostIngestionTask
+            createPostIngestionTask(io.dazzleduck.sql.commons.ingestion.IngestionResult r) {
+                return io.dazzleduck.sql.commons.ingestion.PostIngestionTask.NOOP;
+            }
+            @Override public String getTargetPath(String id) { return signalPaths.getOrDefault(id, "./" + id); }
+            @Override public String[] getPartitionBy(String id) { return new String[0]; }
+        });
+        props.setIngestionConfig(new io.dazzleduck.sql.commons.ingestion.IngestionConfig(
+                MIN_BUCKET_BYTES,
+                io.dazzleduck.sql.commons.ingestion.IngestionConfig.DEFAULT_MAX_BUCKET_SIZE,
+                io.dazzleduck.sql.commons.ingestion.IngestionConfig.DEFAULT_MAX_BATCHES,
+                io.dazzleduck.sql.commons.ingestion.IngestionConfig.DEFAULT_MAX_PENDING_WRITE,
+                java.time.Duration.ofMillis(1000L),
+                io.dazzleduck.sql.commons.ingestion.IngestionConfig.DEFAULT_CONFIG_REFRESH));
         props.setSecretKey(SECRET_KEY_BASE64);
         props.setUsers(Map.of("admin", "admin"));
 

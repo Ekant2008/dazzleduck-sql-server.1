@@ -1,25 +1,58 @@
 package io.dazzleduck.sql.commons.ingestion;
 
 public interface IngestionHandler {
+
     PostIngestionTask createPostIngestionTask(IngestionResult ingestionResult);
 
     String getTargetPath(String queueId);
 
-    default String getTransformation(String queueId) {
-        return null;
-    }
-
-
+    default String getTransformation(String queueId) { return null; }
 
     String[] getPartitionBy(String queueId);
 
+    default boolean supportPartitionByHeader() { return true; }
+
+    // -----------------------------------------------------------------------
+    // Queue lifecycle
+    // -----------------------------------------------------------------------
+
+    /** Creates a new {@link ParquetIngestionQueue} for the given queue ID and target path. */
+    @FunctionalInterface
+    interface QueueCreator {
+        ParquetIngestionQueue create(String queueId, String targetPath);
+    }
+
+    /** Receives lifecycle events so callers can record metrics without the handler needing a recorder. */
+    interface QueueEventListener {
+        void onCreated(String queueId);
+        default void onRefreshed(String queueId) {}
+        default void onDeleted(String queueId) {}
+    }
+
+    /** Returns stats for all currently cached queues. */
+    default java.util.List<Stats> getQueueStats() { return java.util.List.of(); }
+
+    /** Closes and clears all cached queues on producer shutdown. */
+    default void closeQueues() {}
+
     /**
+     * Returns the live queue for {@code queueId}, creating or refreshing it as necessary.
+     * Returns {@code null} when the queue's target path is gone (tombstone / deleted mapping).
      *
-     * @return Indicate if partition-by-header is supported or not. If this is set to false and client sends partition by header
-     * then this will result in error send to client indicating partition-by header is not supported
-     *
+     * <p>The default implementation is stateless: it creates a fresh queue on every call.
+     * Override in stateful handlers (e.g. {@link DuckLakeIngestionHandler}) to add
+     * caching and lazy-refresh semantics.
      */
-    default boolean supportPartitionByHeader(){
-        return true;
+    default ParquetIngestionQueue getOrCreateQueue(String queueId,
+                                                   QueueCreator creator,
+                                                   QueueEventListener listener) {
+        String path = getTargetPath(queueId);
+        if (path == null) {
+            listener.onDeleted(queueId);
+            return null;
+        }
+        ParquetIngestionQueue q = creator.create(queueId, path);
+        listener.onCreated(queueId);
+        return q;
     }
 }

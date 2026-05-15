@@ -39,15 +39,16 @@ public class OtelCollectorServer implements Closeable {
             ConnectionPool.executeOnSingleton(startupScript);
         }
 
-        logWriter     = new SignalWriter("logs",    props.getLogIngestionConfig(),    props.getLogIngestionTaskFactory());
-        traceWriter   = new SignalWriter("traces",  props.getTraceIngestionConfig(),  props.getTraceIngestionTaskFactory());
-        metricsWriter = new SignalWriter("metrics", props.getMetricIngestionConfig(), props.getMetricIngestionTaskFactory());
+        var handler = props.getIngestionHandler();
+        var ingestionConfig = props.getIngestionConfig();
+        logWriter     = new SignalWriter("logs",    handler, ingestionConfig);
+        traceWriter   = new SignalWriter("traces",  handler, ingestionConfig);
+        metricsWriter = new SignalWriter("metrics", handler, ingestionConfig);
 
         setupCommonTags(props.getMeterRegistry(), props.getServiceName());
+        long maxDelayMs = ingestionConfig.maxDelay().toMillis();
         OtelCollectorMetrics metrics = new OtelCollectorMetrics(props.getMeterRegistry(),
-                props.getLogIngestionConfig().maxDelayMs(),
-                props.getTraceIngestionConfig().maxDelayMs(),
-                props.getMetricIngestionConfig().maxDelayMs());
+                maxDelayMs, maxDelayMs, maxDelayMs);
         metrics.registerWriter("logs",    logWriter);
         metrics.registerWriter("traces",  traceWriter);
         metrics.registerWriter("metrics", metricsWriter);
@@ -78,9 +79,9 @@ public class OtelCollectorServer implements Closeable {
 
         log.info("OTLP gRPC server started on port {} — logs={}, traces={}, metrics={}",
                 props.getGrpcPort(),
-                props.getLogIngestionConfig().outputPath(),
-                props.getTraceIngestionConfig().outputPath(),
-                props.getMetricIngestionConfig().outputPath());
+                props.getIngestionHandler().getTargetPath("logs"),
+                props.getIngestionHandler().getTargetPath("traces"),
+                props.getIngestionHandler().getTargetPath("metrics"));
     }
 
     private static void setupCommonTags(MeterRegistry registry, String serviceName) {

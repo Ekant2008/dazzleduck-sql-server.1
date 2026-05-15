@@ -1,5 +1,6 @@
 package io.dazzleduck.sql.otel.collector.config;
 
+import io.dazzleduck.sql.commons.ingestion.IngestionConfig;
 import io.dazzleduck.sql.commons.ingestion.IngestionHandler;
 import io.dazzleduck.sql.commons.ingestion.NOOPIngestionTaskFactoryProvider;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -7,24 +8,17 @@ import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 
 import java.time.Duration;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 
 public class CollectorProperties {
 
     private int grpcPort = 4317;
-    private SignalIngestionConfig logIngestionConfig =
-            new SignalIngestionConfig("./otel-logs", List.of(), null, 1_048_576L, 5000L);
-    private SignalIngestionConfig traceIngestionConfig =
-            new SignalIngestionConfig("./otel-traces", List.of(), null, 1_048_576L, 5000L);
-    private SignalIngestionConfig metricIngestionConfig =
-            new SignalIngestionConfig("./otel-metrics", List.of(), null, 1_048_576L, 5000L);
-    private IngestionHandler logIngestionHandler =
-            new NOOPIngestionTaskFactoryProvider("./otel-logs").getIngestionHandler();
-    private IngestionHandler traceIngestionHandler =
-            new NOOPIngestionTaskFactoryProvider("./otel-traces").getIngestionHandler();
-    private IngestionHandler metricIngestionHandler =
-            new NOOPIngestionTaskFactoryProvider("./otel-metrics").getIngestionHandler();
+    private IngestionHandler ingestionHandler =
+            new NOOPIngestionTaskFactoryProvider("./otel-output").getIngestionHandler();
+    private IngestionConfig ingestionConfig = new IngestionConfig(
+            1_048_576L, IngestionConfig.DEFAULT_MAX_BUCKET_SIZE, IngestionConfig.DEFAULT_MAX_BATCHES,
+            IngestionConfig.DEFAULT_MAX_PENDING_WRITE, Duration.ofSeconds(5),
+            IngestionConfig.DEFAULT_CONFIG_REFRESH);
     private String startupScript = "INSTALL arrow FROM community; LOAD arrow;";
     private String serviceName = "open-telemetry-collector";
     private String authentication = "jwt";
@@ -42,52 +36,20 @@ public class CollectorProperties {
         this.grpcPort = grpcPort;
     }
 
-    public SignalIngestionConfig getLogIngestionConfig() {
-        return logIngestionConfig;
+    public IngestionHandler getIngestionHandler() {
+        return ingestionHandler;
     }
 
-    public void setLogIngestionConfig(SignalIngestionConfig logIngestionConfig) {
-        this.logIngestionConfig = logIngestionConfig;
+    public void setIngestionHandler(IngestionHandler ingestionHandler) {
+        this.ingestionHandler = ingestionHandler;
     }
 
-    public SignalIngestionConfig getTraceIngestionConfig() {
-        return traceIngestionConfig;
+    public IngestionConfig getIngestionConfig() {
+        return ingestionConfig;
     }
 
-    public void setTraceIngestionConfig(SignalIngestionConfig traceIngestionConfig) {
-        this.traceIngestionConfig = traceIngestionConfig;
-    }
-
-    public SignalIngestionConfig getMetricIngestionConfig() {
-        return metricIngestionConfig;
-    }
-
-    public void setMetricIngestionConfig(SignalIngestionConfig metricIngestionConfig) {
-        this.metricIngestionConfig = metricIngestionConfig;
-    }
-
-    public IngestionHandler getLogIngestionTaskFactory() {
-        return logIngestionHandler;
-    }
-
-    public void setLogIngestionTaskFactory(IngestionHandler logIngestionHandler) {
-        this.logIngestionHandler = logIngestionHandler;
-    }
-
-    public IngestionHandler getTraceIngestionTaskFactory() {
-        return traceIngestionHandler;
-    }
-
-    public void setTraceIngestionTaskFactory(IngestionHandler traceIngestionHandler) {
-        this.traceIngestionHandler = traceIngestionHandler;
-    }
-
-    public IngestionHandler getMetricIngestionTaskFactory() {
-        return metricIngestionHandler;
-    }
-
-    public void setMetricIngestionTaskFactory(IngestionHandler metricIngestionHandler) {
-        this.metricIngestionHandler = metricIngestionHandler;
+    public void setIngestionConfig(IngestionConfig ingestionConfig) {
+        this.ingestionConfig = ingestionConfig;
     }
 
     public String getServiceName() {

@@ -568,6 +568,63 @@ public class Transformations {
 
     public static List<JsonNode> collectReferencesWithCast(JsonNode tree)                { return collect(tree, IS_REFERENCE_CAST); }
 
+    /**
+     * Rewrites a SQL statement by replacing a single fully-qualified table reference with
+     * the {@code __this} placeholder used by the ingestion transformation CTE.
+     *
+     * <p>Exactly one occurrence of {@code (inputCatalog, inputSchema, inputTable)} must exist
+     * as a BASE_TABLE node in the AST. Aliases are preserved. The rewritten SQL is
+     * serialised back via {@code json_deserialize_sql}.
+     *
+     * @param sql          the view body SQL to rewrite
+     * @param inputCatalog catalog component of the table to replace
+     * @param inputSchema  schema component of the table to replace
+     * @param inputTable   table-name component of the table to replace
+     * @return rewritten SQL with the matched reference replaced by {@code __this}
+     * @throws IllegalArgumentException if the table is not found or appears more than once
+     */
+    public static String rewriteTableAsThis(String sql, String inputCatalog, String inputSchema, String inputTable)
+            throws SQLException, JsonProcessingException {
+        JsonNode ast = parseToTree(sql);
+        int[] count = {0};
+        replaceBaseTableNode(ast, inputCatalog, inputSchema, inputTable, count);
+        if (count[0] == 0) {
+            throw new IllegalArgumentException(
+                    "input_table '%s.%s.%s' not found in view body: %s"
+                            .formatted(inputCatalog, inputSchema, inputTable, sql));
+        }
+        if (count[0] > 1) {
+            throw new IllegalArgumentException(
+                    "input_table '%s.%s.%s' appears %d times in view body — multiple references not supported: %s"
+                            .formatted(inputCatalog, inputSchema, inputTable, count[0], sql));
+        }
+        return parseToSql(ast);
+    }
+
+    private static void replaceBaseTableNode(JsonNode node, String catalog, String schema, String table, int[] count) {
+        if (node == null || node instanceof NullNode || !node.isContainerNode()) return;
+        if (count[0] > 1) return; // already invalid — no point scanning further
+        if (node.isObject()) {
+            JsonNode typeNode = node.get(ExpressionConstants.FIELD_TYPE);
+            if (typeNode != null && ExpressionConstants.NODE_TYPE_BASE_TABLE.equals(typeNode.asText())) {
+                String nodeCatalog = node.get(ExpressionConstants.FIELD_CATALOG_NAME).asText("");
+                String nodeSchema  = node.get(ExpressionConstants.FIELD_SCHEMA_NAME).asText("");
+                String nodeTable   = node.get(ExpressionConstants.FIELD_TABLE_NAME).asText("");
+                if (catalog.equals(nodeCatalog) && schema.equals(nodeSchema) && table.equals(nodeTable)) {
+                    count[0]++;
+                    ObjectNode obj = (ObjectNode) node;
+                    obj.put(ExpressionConstants.FIELD_CATALOG_NAME, "");
+                    obj.put(ExpressionConstants.FIELD_SCHEMA_NAME, "");
+                    obj.put(ExpressionConstants.FIELD_TABLE_NAME, "__this");
+                    return; // don't recurse into the node we just mutated
+                }
+            }
+            node.fields().forEachRemaining(e -> replaceBaseTableNode(e.getValue(), catalog, schema, table, count));
+        } else {
+            node.forEach(child -> replaceBaseTableNode(child, catalog, schema, table, count));
+        }
+    }
+
     public static List<JsonNode> splitStatements(JsonNode tree) {
         ArrayNode statements = (ArrayNode) tree.get(FIELD_STATEMENTS);
         List<JsonNode> results = new ArrayList<>();

@@ -39,6 +39,11 @@ public class ConfigConstants {
     public static final String QUERY_TIMEOUT_MS_KEY = "query_timeout_ms";
     public static final String MAX_QUERY_TIMEOUT_MS_KEY = "max_query_timeout_ms";
 
+    // Ingestion queue transformation keys
+    public static final String TRANSFORMATION_KEY = "transformation";
+    public static final String VIEW_KEY           = "view";
+    public static final String INPUT_TABLE_KEY    = "input_table";
+
     // Cursor / open-query protection keys
     public static final String CURSOR_TTL_MS_KEY              = "cursor_ttl_ms";
     public static final String MAX_CURSORS_PER_IDENTITY_KEY   = "max_cursors_per_identity";

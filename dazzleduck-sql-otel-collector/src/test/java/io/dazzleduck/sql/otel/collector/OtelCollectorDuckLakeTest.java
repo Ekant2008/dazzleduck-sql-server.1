@@ -4,6 +4,7 @@ import com.google.protobuf.ByteString;
 import io.dazzleduck.sql.commons.ConnectionPool;
 import io.dazzleduck.sql.commons.auth.Validator;
 import io.dazzleduck.sql.commons.ingestion.DuckLakeIngestionHandler;
+import io.dazzleduck.sql.commons.ingestion.IngestionConfig;
 import io.dazzleduck.sql.commons.ingestion.QueueIdToTableMapping;
 import io.dazzleduck.sql.commons.util.TestUtils;
 import io.dazzleduck.sql.otel.collector.config.CollectorProperties;
@@ -66,9 +67,12 @@ class OtelCollectorDuckLakeTest {
         Path dataDir = tempDir.resolve("data");
         Files.createDirectories(dataDir);
 
-        Path logsDir   = tempDir.resolve("logs");
-        Path tracesDir = tempDir.resolve("traces");
+        Path logsDir    = tempDir.resolve("logs");
+        Path tracesDir  = tempDir.resolve("traces");
         Path metricsDir = tempDir.resolve("metrics");
+        Files.createDirectories(logsDir);
+        Files.createDirectories(tracesDir);
+        Files.createDirectories(metricsDir);
 
         // Set up DuckLake catalog with narrow tables matching the columns we want to query.
         // ignore_extra_columns => true means the wider Parquet schema written by the collector
@@ -84,30 +88,23 @@ class OtelCollectorDuckLakeTest {
             });
         }
 
-        // Each factory maps the last path segment of the output dir to a DuckLake table.
-        // SignalWriter sets queueName = outputPath, so DuckLakeIngestionTaskFactory resolves
-        // the table via suffix (last segment of the path).
-        var logFactory = new DuckLakeIngestionHandler(Map.of(
-                "logs",    new QueueIdToTableMapping("logs",    CATALOG, "main", "logs",    Map.of(), null)));
-        var traceFactory = new DuckLakeIngestionHandler(Map.of(
-                "traces",  new QueueIdToTableMapping("traces",  CATALOG, "main", "spans",   Map.of(), null)));
-        var metricFactory = new DuckLakeIngestionHandler(Map.of(
+        // Single handler maps all three queue IDs to their respective DuckLake tables.
+        // getTargetPath() returns the DuckLake table path; Parquet files are written there.
+        var ingestionHandler = new DuckLakeIngestionHandler(Map.of(
+                "logs",    new QueueIdToTableMapping("logs",    CATALOG, "main", "logs",    Map.of(), null),
+                "traces",  new QueueIdToTableMapping("traces",  CATALOG, "main", "spans",   Map.of(), null),
                 "metrics", new QueueIdToTableMapping("metrics", CATALOG, "main", "metrics", Map.of(), null)));
 
         CollectorProperties props = new CollectorProperties();
         props.setGrpcPort(freePort());
-        props.setLogIngestionConfig(new io.dazzleduck.sql.otel.collector.config.SignalIngestionConfig(
-                logsDir.toString(), java.util.List.of(), null, 1L, 60_000L));
-        props.setTraceIngestionConfig(new io.dazzleduck.sql.otel.collector.config.SignalIngestionConfig(
-                tracesDir.toString(), java.util.List.of(), null, 1L, 60_000L));
-        props.setMetricIngestionConfig(new io.dazzleduck.sql.otel.collector.config.SignalIngestionConfig(
-                metricsDir.toString(), java.util.List.of(), null, 1L, 60_000L));
         props.setAuthentication("jwt");
         props.setSecretKey(SECRET_KEY_BASE64);
         props.setStartupScript("LOAD arrow;");
-        props.setLogIngestionTaskFactory(logFactory);
-        props.setTraceIngestionTaskFactory(traceFactory);
-        props.setMetricIngestionTaskFactory(metricFactory);
+        props.setIngestionHandler(ingestionHandler);
+        // minBucketSize=1 ensures any batch triggers an immediate flush without relying on the timer.
+        props.setIngestionConfig(new IngestionConfig(1L, IngestionConfig.DEFAULT_MAX_BUCKET_SIZE,
+                IngestionConfig.DEFAULT_MAX_BATCHES, IngestionConfig.DEFAULT_MAX_PENDING_WRITE,
+                java.time.Duration.ofSeconds(60), IngestionConfig.DEFAULT_CONFIG_REFRESH));
 
         otelServer = new OtelCollectorServer(props);
         otelServer.start();
